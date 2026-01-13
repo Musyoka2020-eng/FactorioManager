@@ -20,3 +20,6 @@ venv/
 *.spec
 *.iss
 .pyinstaller/
+
+#Dev Notes MD files
+DEV_NOTES.md
