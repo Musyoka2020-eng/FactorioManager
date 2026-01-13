@@ -1,4 +1,5 @@
 """Checker tab UI."""
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font
 from typing import Dict, List, Optional
@@ -6,6 +7,9 @@ from threading import Thread
 from pathlib import Path
 from ..core import ModChecker, Mod, ModStatus
 from ..utils import config, format_file_size
+from .widgets import PlaceholderEntry
+from .checker_logic import CheckerLogic
+from .checker_presenter import CheckerPresenter
 
 
 class CheckerTab:
@@ -21,16 +25,22 @@ class CheckerTab:
     ERROR_COLOR = "#d13438"
     WARNING_COLOR = "#ffad00"
 
-    def __init__(self, parent: ttk.Notebook):
+    def __init__(self, parent: ttk.Notebook, logger: Optional[logging.Logger] = None, status_manager=None):
         """
         Initialize checker tab.
         
         Args:
             parent: Parent notebook widget
+            logger: Optional logger instance
+            status_manager: StatusManager for updating main window status bar
         """
         self.frame = ttk.Frame(parent, style="Dark.TFrame")
         self.parent = parent
+        self.logger = logger or logging.getLogger(__name__)
+        self.status_manager = status_manager  # Reference to status manager
         self.checker: Optional[ModChecker] = None
+        self.logic: Optional[CheckerLogic] = None
+        self.presenter = CheckerPresenter()
         self.mods: Dict[str, Mod] = {}
         self.selected_mods: set = set()  # Track selected mods for checkboxes
         self.is_scanning = False
@@ -38,6 +48,7 @@ class CheckerTab:
         self.filter_mode = tk.StringVar(value="all")  # Filter: all, outdated, up_to_date, selected
         self.mod_widgets: Dict[str, tk.Frame] = {}  # Map mod names to frame widgets
         self.auto_scan_timer = None  # Timer for auto-scan with delay
+        self.auto_scan_scheduled = False  # Flag to prevent duplicate auto-scans
         
         # Bind to tab visibility to trigger auto-scan
         self.frame.bind("<Visibility>", self._on_tab_visible)
@@ -45,13 +56,30 @@ class CheckerTab:
         self._setup_ui()
     
     def _setup_ui(self) -> None:
-        """Setup the UI components."""
-        # === CONTROL PANEL ===
-        control_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
-        control_frame.pack(fill="x", padx=10, pady=10)
+        """Setup the UI components with three-column layout."""
+        # Configure frame to use grid
+        self.frame.grid_rowconfigure(0, weight=1)  # Main content area (left/center/right)
+        self.frame.grid_rowconfigure(1, weight=0)  # Log area
+        self.frame.grid_columnconfigure(0, weight=0, minsize=200)  # Left sidebar (fixed width)
+        self.frame.grid_columnconfigure(1, weight=1)  # Center (expandable)
+        self.frame.grid_columnconfigure(2, weight=0, minsize=280)  # Right sidebar (fixed width)
         
-        # Header
+        # Font for headers
         header_font = font.Font(family="Segoe UI", size=11, weight="bold")
+        
+        # ============================================
+        # LEFT SIDEBAR - SETTINGS & CONTROL BUTTONS
+        # ============================================
+        left_sidebar = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
+        left_sidebar.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        left_sidebar.grid_rowconfigure(0, weight=0)  # Settings
+        left_sidebar.grid_rowconfigure(1, weight=1)  # Spacer
+        left_sidebar.grid_columnconfigure(0, weight=1)
+        
+        # Settings section
+        control_frame = tk.Frame(left_sidebar, bg=self.DARK_BG)
+        control_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
         header = tk.Label(
             control_frame,
             text="⚙️  Settings",
@@ -59,7 +87,7 @@ class CheckerTab:
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        header.pack(anchor="w", padx=15, pady=(10, 5))
+        header.pack(anchor="w", pady=(0, 10))
         
         # Mods folder selection
         folder_label = tk.Label(
@@ -67,12 +95,12 @@ class CheckerTab:
             text="📁 Mods Folder:",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 9)
         )
-        folder_label.pack(anchor="w", padx=15, pady=(5, 0))
+        folder_label.pack(anchor="w", pady=(0, 3))
         
         folder_frame = tk.Frame(control_frame, bg=self.DARK_BG)
-        folder_frame.pack(fill="x", padx=15, pady=(5, 0))
+        folder_frame.pack(fill="x", pady=(0, 10))
         
         self.folder_var = tk.StringVar(value=config.get("mods_folder", ""))
         self.folder_display = tk.Label(
@@ -80,11 +108,11 @@ class CheckerTab:
             textvariable=self.folder_var,
             bg=self.BG_COLOR,
             fg=self.SECONDARY_FG,
-            font=("Segoe UI", 9),
-            wraplength=400,
+            font=("Segoe UI", 8),
+            wraplength=180,
             justify="left"
         )
-        self.folder_display.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+        self.folder_display.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         browse_btn = tk.Button(
             folder_frame,
@@ -94,54 +122,57 @@ class CheckerTab:
             fg="#ffffff",
             activebackground="#1084d7",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 9, "bold")
+            padx=8,
+            pady=3,
+            font=("Segoe UI", 8, "bold")
         )
-        browse_btn.pack(side="right", padx=5)
+        browse_btn.pack(side="right", padx=3)
         
-        # Operation status indicator
+        # Status indicator
         status_frame = tk.Frame(control_frame, bg=self.DARK_BG)
-        status_frame.pack(fill="x", padx=15, pady=(5, 10))
+        status_frame.pack(fill="x", pady=(0, 10))
         
         self.status_label = tk.Label(
             status_frame,
             text="Ready",
             bg=self.DARK_BG,
             fg=self.SUCCESS_COLOR,
-            font=("Segoe UI", 9)
+            font=("Segoe UI", 8)
         )
         self.status_label.pack(anchor="w")
         
-        # Control buttons
+        # Control buttons (vertical stack)
         button_frame = tk.Frame(control_frame, bg=self.DARK_BG)
-        button_frame.pack(fill="x", padx=15, pady=(10, 10))
+        button_frame.pack(fill="x", pady=(15, 0))
+        
+        button_frame.grid_columnconfigure(0, weight=1)
         
         self.scan_btn = tk.Button(
             button_frame,
-            text="🔍 Scan Mods",
+            text="🔍 Scan",
             command=self._start_scan,
             bg=self.ACCENT_COLOR,
             fg="#ffffff",
             activebackground="#1084d7",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold")
+            pady=6,
+            font=("Segoe UI", 9, "bold")
         )
-        self.scan_btn.pack(side="left", padx=5)
+        self.scan_btn.pack(fill="x", pady=2, padx=3)
         
         self.check_btn = tk.Button(
             button_frame,
-            text="⬆️  Check Updates",
+            text="⬆️ Check Updates",
             command=self._start_check,
             bg=self.WARNING_COLOR,
             fg="#000000",
             activebackground="#ffbb22",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold"),
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
             state="disabled"
         )
-        self.check_btn.pack(side="left", padx=5)
+        self.check_btn.pack(fill="x", pady=2, padx=3)
         
         self.update_btn = tk.Button(
             button_frame,
@@ -151,25 +182,25 @@ class CheckerTab:
             fg="#000000",
             activebackground="#5cd65f",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold"),
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
             state="disabled"
         )
-        self.update_btn.pack(side="left", padx=5)
+        self.update_btn.pack(fill="x", pady=2, padx=3)
         
         self.delete_btn = tk.Button(
             button_frame,
-            text="🗑️  Delete Selected",
+            text="🗑️  Delete",
             command=self._delete_selected,
             bg=self.ERROR_COLOR,
             fg="#ffffff",
             activebackground="#c41c1c",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold"),
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
             state="disabled"
         )
-        self.delete_btn.pack(side="left", padx=5)
+        self.delete_btn.pack(fill="x", pady=2, padx=3)
         
         self.update_all_btn = tk.Button(
             button_frame,
@@ -179,101 +210,185 @@ class CheckerTab:
             fg="#000000",
             activebackground="#5cd65f",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold"),
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
             state="disabled"
         )
-        self.update_all_btn.pack(side="left", padx=5)
+        self.update_all_btn.pack(fill="x", pady=2, padx=3)
         
         self.delete_backups_btn = tk.Button(
             button_frame,
-            text="🧹 Clean Backups",
+            text="🧹 Backups",
             command=self._delete_all_backups,
             bg="#8b5a00",
             fg="#ffffff",
             activebackground="#a66d00",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold")
+            pady=6,
+            font=("Segoe UI", 8, "bold")
         )
-        self.delete_backups_btn.pack(side="left", padx=5)
+        self.delete_backups_btn.pack(fill="x", pady=2, padx=3)
         
         self.backup_btn = tk.Button(
             button_frame,
-            text="💾 Backup Selected",
+            text="💾 Backup",
             command=self._backup_selected,
             bg="#6b5b95",
             fg="#ffffff",
             activebackground="#7b6ba5",
             relief="flat",
-            padx=15,
-            font=("Segoe UI", 10, "bold"),
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
             state="disabled"
         )
-        self.backup_btn.pack(side="left", padx=5)
+        self.backup_btn.pack(fill="x", pady=2, padx=3)
         
-        # === STATISTICS SECTION ===
-        stats_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
-        stats_frame.pack(fill="x", padx=10, pady=(0, 10))
+        # ============================================
+        # CENTER - INSTALLED MODS LIST
+        # ============================================
+        center_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
+        center_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        center_frame.grid_rowconfigure(0, weight=0)  # Header
+        center_frame.grid_rowconfigure(1, weight=1)  # Mods list
+        center_frame.grid_columnconfigure(0, weight=1)
         
-        stats_header = tk.Label(
-            stats_frame,
-            text="📊 Statistics",
+        center_header = tk.Label(
+            center_frame,
+            text="📦 Installed Mods",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        stats_header.pack(anchor="w", padx=15, pady=(10, 5))
+        center_header.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
         
-        self.stats_label = tk.Label(
+        # Mods canvas container
+        list_container = tk.Frame(center_frame, bg=self.DARK_BG)
+        list_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        list_container.grid_rowconfigure(0, weight=1)
+        list_container.grid_columnconfigure(0, weight=1)
+        
+        v_scroll = tk.Scrollbar(list_container)
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        
+        self.mods_canvas = tk.Canvas(
+            list_container,
+            bg=self.BG_COLOR,
+            highlightthickness=0,
+            yscrollcommand=v_scroll.set
+        )
+        self.mods_canvas.grid(row=0, column=0, sticky="nsew")
+        v_scroll.config(command=self.mods_canvas.yview)
+        
+        # Frame inside canvas to hold mod items
+        self.mods_frame = tk.Frame(self.mods_canvas, bg=self.BG_COLOR)
+        self.mods_window = self.mods_canvas.create_window((0, 0), window=self.mods_frame, anchor="nw")
+        
+        def on_frame_configure(event):
+            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
+            # Expand mods_frame to match canvas width
+            canvas_width = self.mods_canvas.winfo_width()
+            if canvas_width > 1:
+                self.mods_canvas.itemconfig(self.mods_window, width=canvas_width)
+        
+        def on_canvas_configure(event):
+            # When canvas resizes, expand mods_frame width
+            if event.width > 1:
+                self.mods_canvas.itemconfig(self.mods_window, width=event.width)
+        
+        self.mods_frame.bind("<Configure>", on_frame_configure)
+        self.mods_canvas.bind("<Configure>", on_canvas_configure)
+        
+        # Bind mouse wheel for scrolling (with error handling)
+        def on_mousewheel(event):
+            try:
+                self.mods_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass
+        
+        self.mods_canvas.bind("<MouseWheel>", on_mousewheel, add="+")
+        
+        # ============================================
+        # RIGHT SIDEBAR - STATISTICS & FILTERS
+        # ============================================
+        right_sidebar = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1, width=280)
+        right_sidebar.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+        right_sidebar.grid_propagate(False)  # Prevent frame from expanding beyond set width
+        right_sidebar.grid_rowconfigure(0, weight=0)  # Stats (fixed)
+        right_sidebar.grid_rowconfigure(1, weight=1)  # Filters (can expand to fill space)
+        right_sidebar.grid_columnconfigure(0, weight=1)
+        
+        # Statistics section
+        stats_frame = tk.Frame(right_sidebar, bg=self.DARK_BG)
+        stats_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(5, 3))
+        stats_frame.grid_columnconfigure(0, weight=0)
+        stats_frame.grid_columnconfigure(1, weight=1)
+        
+        stats_header = tk.Label(
             stats_frame,
-            text="No data - Scan mods to get started",
+            text="📊 Statistics",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.DARK_BG,
+            fg=self.FG_COLOR
+        )
+        stats_header.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        
+        # Stats items - each on its own row (label | value)
+        self.stats_items = {}  # Store stat labels for updating
+        
+        # Initial empty state
+        self.no_data_label = tk.Label(
+            stats_frame,
+            text="No data yet",
             bg=self.DARK_BG,
             fg=self.SECONDARY_FG,
-            font=("Segoe UI", 9),
-            wraplength=800,
-            justify="left"
+            font=("Segoe UI", 8)
         )
-        self.stats_label.pack(anchor="w", padx=15, pady=(0, 10))
+        self.no_data_label.grid(row=1, column=0, columnspan=2, sticky="w")
+        self.stats_frame_ref = stats_frame
         
-        # === SEARCH/FILTER SECTION ===
-        search_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
-        search_frame.pack(fill="x", padx=10, pady=(0, 10))
+        # Search & Filter section
+        filter_frame = tk.Frame(right_sidebar, bg=self.DARK_BG)
+        filter_frame.grid(row=1, column=0, sticky="new", padx=10, pady=(3, 3))
+        filter_frame.grid_columnconfigure(0, weight=1)
         
         search_label = tk.Label(
-            search_frame,
-            text="🔎 Search & Filter:",
+            filter_frame,
+            text="🔎 Search",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 9, "bold")
         )
-        search_label.pack(anchor="w", padx=15, pady=(10, 5))
+        search_label.pack(anchor="w", pady=(0, 2))
         
         # Search entry
-        self.search_entry = tk.Entry(
-            search_frame,
+        self.search_entry = PlaceholderEntry(
+            filter_frame,
+            placeholder="by name...",
+            placeholder_color="#666666",
             textvariable=self.filter_var,
             bg=self.BG_COLOR,
             fg=self.FG_COLOR,
             insertbackground=self.FG_COLOR,
             borderwidth=1,
             relief="solid",
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 9)
         )
-        self.search_entry.pack(fill="x", padx=15, pady=(0, 10))
+        self.search_entry.pack(fill="x", pady=(0, 3))
         self.filter_var.trace("w", lambda *args: self._filter_mods())
         
-        # Filter buttons
-        filter_btn_frame = tk.Frame(search_frame, bg=self.DARK_BG)
-        filter_btn_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+        # Status filter label
         tk.Label(
-            filter_btn_frame,
+            filter_frame,
             text="Status Filter:",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 9)
-        ).pack(side="left", padx=(0, 10))
+            font=("Segoe UI", 8, "bold")
+        ).pack(anchor="w", pady=(0, 2))
+        
+        # Filter buttons (2x2 grid)
+        filter_buttons_frame = tk.Frame(filter_frame, bg=self.DARK_BG)
+        filter_buttons_frame.pack(fill="x", pady=(0, 3))
+        filter_buttons_frame.grid_columnconfigure([0, 1], weight=1)
         
         filter_buttons = [
             ("All", "all"),
@@ -282,45 +397,49 @@ class CheckerTab:
             ("Selected", "selected")
         ]
         
-        for label, value in filter_buttons:
+        for idx, (label, value) in enumerate(filter_buttons):
+            row = idx // 2
+            col = idx % 2
             btn = tk.Button(
-                filter_btn_frame,
+                filter_buttons_frame,
                 text=label,
                 command=lambda v=value: self._set_filter(v),
                 bg=self.ACCENT_COLOR,
                 fg="#ffffff",
                 activebackground="#1084d7",
                 relief="flat",
-                padx=10,
+                padx=8,
+                pady=4,
                 font=("Segoe UI", 8)
             )
-            btn.pack(side="left", padx=3)
-            # Store reference for later highlighting
+            btn.grid(row=row, column=col, sticky="ew", padx=2, pady=2)
             if not hasattr(self, 'filter_buttons'):
                 self.filter_buttons = {}
             self.filter_buttons[value] = btn
         
-        # Sort options
-        sort_frame = tk.Frame(search_frame, bg=self.DARK_BG)
-        sort_frame.pack(fill="x", padx=15, pady=(0, 10))
-        
+        # Sort label
         tk.Label(
-            sort_frame,
+            filter_frame,
             text="Sort By:",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 9)
-        ).pack(side="left", padx=(0, 10))
+            font=("Segoe UI", 8, "bold")
+        ).pack(anchor="w", pady=(2, 1))
+        
+        # Sort options in frame for better alignment
+        sort_frame = tk.Frame(filter_frame, bg=self.DARK_BG)
+        sort_frame.pack(fill="x")
+        sort_frame.grid_columnconfigure(0, weight=1)
         
         self.sort_var = tk.StringVar(value="name")
         sort_options = [
             ("Name", "name"),
             ("Version", "version"),
             ("Downloads", "downloads"),
-            ("Date Added", "date")
+            ("Date", "date"),
         ]
         
-        for label, value in sort_options:
+        for idx, (label, value) in enumerate(sort_options):
             tk.Radiobutton(
                 sort_frame,
                 text=label,
@@ -331,65 +450,15 @@ class CheckerTab:
                 fg=self.FG_COLOR,
                 selectcolor=self.ACCENT_COLOR,
                 font=("Segoe UI", 8)
-            ).pack(side="left", padx=5)
+            ).grid(row=idx, column=0, sticky="w", pady=0)
         
-        # === MODS LIST SECTION ===
-        list_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        
-        list_header = tk.Label(
-            list_frame,
-            text="📦 Installed Mods",
-            font=header_font,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR
-        )
-        list_header.pack(anchor="w", padx=15, pady=(10, 5))
-        
-        # Canvas with scrollbar for mod list with checkboxes
-        list_container = tk.Frame(list_frame, bg=self.DARK_BG)
-        list_container.pack(fill="both", expand=True, padx=15, pady=(0, 10))
-        
-        v_scroll = tk.Scrollbar(list_container)
-        v_scroll.pack(side="right", fill="y")
-        
-        self.mods_canvas = tk.Canvas(
-            list_container,
-            bg=self.BG_COLOR,
-            highlightthickness=0,
-            yscrollcommand=v_scroll.set
-        )
-        self.mods_canvas.pack(side="left", fill="both", expand=True)
-        v_scroll.config(command=self.mods_canvas.yview)
-        
-        # Frame inside canvas to hold mod items
-        self.mods_frame = tk.Frame(self.mods_canvas, bg=self.BG_COLOR)
-        self.mods_canvas.create_window((0, 0), window=self.mods_frame, anchor="nw")
-        
-        def on_frame_configure(event):
-            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
-        
-        self.mods_frame.bind("<Configure>", on_frame_configure)
-        
-        # Bind mouse wheel for scrolling
-        def on_mousewheel(event):
-            # Windows uses MouseWheel event
-            self.mods_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        self.mods_canvas.bind("<MouseWheel>", on_mousewheel)
-        self.mods_frame.bind("<MouseWheel>", on_mousewheel)
-        
-        # Also bind to frame children for better scroll propagation
-        def bind_scroll_recursive(widget):
-            widget.bind("<MouseWheel>", on_mousewheel)
-            for child in widget.winfo_children():
-                bind_scroll_recursive(child)
-        
-        self.mods_frame.bind("<Configure>", lambda e: bind_scroll_recursive(self.mods_frame) or on_frame_configure(e))
-        
-        # === PROGRESS LOG SECTION ===
+        # ============================================
+        # BOTTOM - PROGRESS LOG (spans all columns)
+        # ============================================
         log_frame = tk.Frame(self.frame, bg=self.DARK_BG, relief="flat", bd=1)
-        log_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        log_frame.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=5, pady=(0, 5))
+        log_frame.grid_rowconfigure(1, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
         
         log_header = tk.Label(
             log_frame,
@@ -398,27 +467,29 @@ class CheckerTab:
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        log_header.pack(anchor="w", padx=15, pady=(10, 5))
+        log_header.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
         
-        # Text widget with scrollbar for progress log
+        # Text widget with scrollbar
         log_container = tk.Frame(log_frame, bg=self.DARK_BG)
-        log_container.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+        log_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        log_container.grid_rowconfigure(0, weight=1)
+        log_container.grid_columnconfigure(0, weight=1)
         
         log_scroll = tk.Scrollbar(log_container)
-        log_scroll.pack(side="right", fill="y")
+        log_scroll.grid(row=0, column=1, sticky="ns")
         
         self.progress_log = tk.Text(
             log_container,
-            height=6,
+            height=5,
             bg=self.BG_COLOR,
             fg=self.SECONDARY_FG,
             yscrollcommand=log_scroll.set,
-            font=("Consolas", 9),
+            font=("Consolas", 8),
             relief="flat",
             wrap="word"
         )
         log_scroll.config(command=self.progress_log.yview)
-        self.progress_log.pack(fill="both", expand=True)
+        self.progress_log.grid(row=0, column=0, sticky="nsew")
         
         # Configure text tags for different message types
         self.progress_log.tag_configure("success", foreground=self.SUCCESS_COLOR)
@@ -440,7 +511,15 @@ class CheckerTab:
     
     def _log_progress(self, message: str, tag: str = "normal") -> None:
         """Log progress message to both console and UI."""
-        print(message)
+        # Log to logger for Logs tab
+        if tag == "error":
+            self.logger.error(message)
+        elif tag == "success":
+            self.logger.info(f"✓ {message}")
+        elif tag == "warning":
+            self.logger.warning(message)
+        else:
+            self.logger.info(message)
         
         try:
             # Add to progress log in UI
@@ -453,216 +532,296 @@ class CheckerTab:
                 self.progress_log.update()  # Force UI update
         except Exception as e:
             # Widget was destroyed or invalid path, just log to console
-            print(f"  (UI update failed: {e})")
+            self.logger.debug(f"UI update failed: {e}")
     
     def _update_status(self, message: str, color: Optional[str] = None) -> None:
-        """Update the status label."""
+        """Update the status via the status manager and local label (thread-safe for concurrent operations)."""
+        # Update local status label in left sidebar
         try:
-            if self.status_label.winfo_exists():
-                self.status_label.config(text=message, fg=color or self.SECONDARY_FG)
-                self.status_label.update()
+            if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                self.frame.after_idle(lambda: self.status_label.config(text=message, fg=color or self.SECONDARY_FG))
         except:
-            pass  # Widget was destroyed, ignore
+            pass
+        
+        # Push to main window status manager if available
+        if not self.status_manager:
+            return
+        
+        # Determine status type based on message and color
+        if "Error" in message or "failed" in message:
+            status_type = "error"
+        elif "✓" in message or "Complete" in message:
+            status_type = "success"
+        elif "Scanning" in message or "Checking" in message or "Updating" in message:
+            status_type = "working"
+        else:
+            status_type = "info"
+        
+        self.status_manager.push_status(message, status_type)
     
     def _bind_scroll_recursive(self, widget) -> None:
         """Recursively bind mouse wheel scroll to widget and all children."""
         def on_mousewheel(event):
-            self.mods_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            try:
+                # Use scroll amount that's more responsive
+                self.mods_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass
         
-        widget.bind("<MouseWheel>", on_mousewheel)
+        try:
+            widget.bind("<MouseWheel>", on_mousewheel, add="+")
+        except:
+            pass
+        
         for child in widget.winfo_children():
             self._bind_scroll_recursive(child)
     
     def _update_stats(self) -> None:
-        """Update statistics display."""
-        if not self.checker:
+        """Update statistics display with multiline layout."""
+        if not self.mods:
             return
         
-        stats = self.checker.get_statistics()
-        stats_text = (
-            f"Total: {stats['total']} mods  •  "
-            f"✓ Up to date: {stats['up_to_date']}  •  "
-            f"⬆️  Outdated: {stats['outdated']}  •  "
-            f"❓ Unknown: {stats['unknown']}  •  "
-            f"✗ Errors: {stats['errors']}"
-        )
-        self.stats_label.config(text=stats_text)
+        stats = self.presenter.get_statistics(self.mods)
+        stats_items = self.presenter.format_statistics_multiline(stats)
+        
+        # Clear old stats if any - with error handling
+        try:
+            for label, value in list(self.stats_items.values()):  # Create list copy
+                try:
+                    label.destroy()
+                except:
+                    pass
+                try:
+                    value.destroy()
+                except:
+                    pass
+            self.stats_items.clear()
+        except:
+            pass
+        
+        # Hide "No data yet" label if visible
+        try:
+            self.no_data_label.grid_forget()
+        except:
+            pass
+        
+        # Create stat rows (label on left, value on right)
+        for idx, (label_text, value_text) in enumerate(stats_items, start=1):
+            try:
+                # Label (e.g., "Total")
+                label = tk.Label(
+                    self.stats_frame_ref,
+                    text=label_text,
+                    bg=self.DARK_BG,
+                    fg=self.FG_COLOR,
+                    font=("Segoe UI", 8),
+                    anchor="w"
+                )
+                label.grid(row=idx, column=0, sticky="w", pady=2)
+                
+                # Value (e.g., "88")
+                value = tk.Label(
+                    self.stats_frame_ref,
+                    text=value_text,
+                    bg=self.DARK_BG,
+                    fg=self.ACCENT_COLOR,
+                    font=("Segoe UI", 8, "bold"),
+                    anchor="e"
+                )
+                value.grid(row=idx, column=1, sticky="ew", padx=(5, 0), pady=2)
+                
+                self.stats_items[label_text] = (label, value)
+            except:
+                pass  # Widget creation failed, skip this stat
     
     def _populate_mods_list(self) -> None:
-        """Populate the mods list with click-to-select functionality."""
-        # Clear existing widgets
-        for widget in self.mods_frame.winfo_children():
-            widget.destroy()
-        self.mod_widgets.clear()
-        self.selected_mods.clear()
+        """Populate the mods list with click-to-select functionality (optimized with aligned columns)."""
+        # Disable updates during population to prevent UI freezing
+        try:
+            self.mods_canvas.config(state="disabled")
+        except:
+            pass
         
-        # Add mods with click selection
-        for mod_name in sorted(self.mods.keys()):
-            mod = self.mods[mod_name]
+        try:
+            # Clear existing widgets - safer approach
+            for widget in list(self.mods_frame.winfo_children()):  # Create list copy
+                try:
+                    widget.destroy()
+                except:
+                    pass  # Widget already destroyed, skip
+            self.mod_widgets.clear()
+            self.selected_mods.clear()
+            if hasattr(self, 'check_indicators'):
+                self.check_indicators.clear()
             
-            # Determine status icon/color
-            status_map = {
-                ModStatus.UP_TO_DATE: ("✓ Up to date", self.SUCCESS_COLOR),
-                ModStatus.OUTDATED: ("⬆️  Outdated", self.WARNING_COLOR),
-                ModStatus.UNKNOWN: ("❓ Unknown", self.SECONDARY_FG),
-                ModStatus.ERROR: ("✗ Error", self.ERROR_COLOR),
-            }
-            status_text, status_color = status_map.get(mod.status, ("❓ Unknown", self.SECONDARY_FG))
+            # Column widths for alignment
+            CHECKBOX_WIDTH = 2
+            STATUS_WIDTH = 12
+            VERSION_WIDTH = 15
             
-            # Create mod item frame (entire row is clickable)
-            item_frame = tk.Frame(self.mods_frame, bg=self.BG_COLOR, relief="solid", bd=1, cursor="hand2")
-            item_frame.pack(fill="x", pady=2)
-            
-            # Store widget reference for selection
-            self.mod_widgets[mod_name] = item_frame
-            
-            # Handler for row clicks (Ctrl behavior applies)
-            def create_row_click_handler(mod_n, frame):
-                def on_click(event):
-                    ctrl_pressed = event.state & 0x4  # Check Ctrl key
-                    if not ctrl_pressed and self.selected_mods:
-                        # No Ctrl, deselect others
-                        self.selected_mods.clear()
-                    
-                    # Toggle current selection
-                    if mod_n in self.selected_mods:
-                        self.selected_mods.discard(mod_n)
-                    else:
-                        self.selected_mods.add(mod_n)
-                    
-                    # Refresh display to show selection
-                    self._refresh_selection_display()
+            # Build all mod items
+            mod_items = []
+            for mod_name in sorted(self.mods.keys()):
+                mod = self.mods[mod_name]
                 
-                return on_click
-            
-            # Handler for checkbox clicks (no Ctrl needed, just toggle)
-            def create_checkbox_handler(mod_n):
-                def on_click(event):
-                    # Simply toggle without deselecting others
-                    if mod_n in self.selected_mods:
-                        self.selected_mods.discard(mod_n)
-                    else:
-                        self.selected_mods.add(mod_n)
-                    
-                    # Refresh display to show selection
-                    self._refresh_selection_display()
+                # Determine status icon/color
+                status_map = {
+                    ModStatus.UP_TO_DATE: ("✓ Up to date", self.SUCCESS_COLOR),
+                    ModStatus.OUTDATED: ("⬆️ Outdated", self.WARNING_COLOR),
+                    ModStatus.UNKNOWN: ("❓ Unknown", self.SECONDARY_FG),
+                    ModStatus.ERROR: ("✗ Error", self.ERROR_COLOR),
+                }
+                status_text, status_color = status_map.get(mod.status, ("❓ Unknown", self.SECONDARY_FG))
                 
-                return on_click
-            
-            # Bind row click to frame
-            item_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Info frame
-            info_frame = tk.Frame(item_frame, bg=self.BG_COLOR)
-            info_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-            info_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Checkbox indicator (shows selection status)
-            check_indicator = tk.Label(
-                info_frame,
-                text="☐",  # Empty checkbox
-                bg=self.BG_COLOR,
-                fg=self.ACCENT_COLOR,
-                font=("Segoe UI", 11, "bold"),
-                width=2
-            )
-            check_indicator.pack(side="left", padx=(0, 10))
-            # Checkbox has independent toggle behavior (no Ctrl needed)
-            check_indicator.bind("<Button-1>", create_checkbox_handler(mod_name))
-            # Store reference for updating
-            if not hasattr(self, 'check_indicators'):
-                self.check_indicators = {}
-            self.check_indicators[mod_name] = check_indicator
-            
-            # Mod name and info
-            name_text = f"{mod.title or mod.name} ({mod.name})"
-            name_label = tk.Label(
-                info_frame,
-                text=name_text,
-                bg=self.BG_COLOR,
-                fg=self.FG_COLOR,
-                font=("Segoe UI", 9, "bold"),
-                anchor="w"
-            )
-            name_label.pack(side="left", fill="x", expand=True)
-            name_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Status
-            status_label = tk.Label(
-                info_frame,
-                text=status_text,
-                bg=self.BG_COLOR,
-                fg=status_color,
-                font=("Segoe UI", 9),
-                width=15,
-                anchor="center"
-            )
-            status_label.pack(side="left", padx=5)
-            status_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Version info
-            version_text = f"{mod.version} → {mod.latest_version or '?'}"
-            version_label = tk.Label(
-                info_frame,
-                text=version_text,
-                bg=self.BG_COLOR,
-                fg=self.SECONDARY_FG,
-                font=("Segoe UI", 8),
-                width=20,
-                anchor="center"
-            )
-            version_label.pack(side="left", padx=5)
-            version_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Author label and value
-            author_frame = tk.Frame(info_frame, bg=self.BG_COLOR)
-            author_frame.pack(side="left", padx=5)
-            author_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            tk.Label(
-                author_frame,
-                text="Author:",
-                bg=self.BG_COLOR,
-                fg=self.SECONDARY_FG,
-                font=("Segoe UI", 8)
-            ).pack(side="left", padx=(0, 3))
-            
-            author_label = tk.Label(
-                author_frame,
-                text=mod.author,
-                bg=self.BG_COLOR,
-                fg=self.FG_COLOR,
-                font=("Segoe UI", 8)
-            )
-            author_label.pack(side="left")
-            author_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Downloads label and value
-            if mod.downloads:
-                dl_frame = tk.Frame(info_frame, bg=self.BG_COLOR)
-                dl_frame.pack(side="left", padx=5)
-                dl_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                # Create mod item frame
+                item_frame = tk.Frame(self.mods_frame, bg=self.BG_COLOR, relief="solid", bd=1, cursor="hand2")
+                self.mod_widgets[mod_name] = item_frame
                 
-                tk.Label(
-                    dl_frame,
-                    text="Downloads:",
+                # Configure grid for columns
+                item_frame.grid_columnconfigure(0, minsize=25)   # Checkbox
+                item_frame.grid_columnconfigure(1, weight=1)     # Name (expandable)
+                item_frame.grid_columnconfigure(2, minsize=95)   # Status
+                item_frame.grid_columnconfigure(3, minsize=110)  # Version
+                item_frame.grid_columnconfigure(4, minsize=150)  # Author
+                
+                # Create click handlers
+                def create_row_click_handler(mod_n, frame):
+                    def on_click(event):
+                        ctrl_pressed = event.state & 0x4
+                        if not ctrl_pressed and self.selected_mods:
+                            self.selected_mods.clear()
+                        
+                        if mod_n in self.selected_mods:
+                            self.selected_mods.discard(mod_n)
+                        else:
+                            self.selected_mods.add(mod_n)
+                        
+                        self._refresh_selection_display()
+                    return on_click
+                
+                def create_checkbox_handler(mod_n):
+                    def on_click(event):
+                        if mod_n in self.selected_mods:
+                            self.selected_mods.discard(mod_n)
+                        else:
+                            self.selected_mods.add(mod_n)
+                        self._refresh_selection_display()
+                    return on_click
+                
+                # Bind click handler to frame
+                item_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Checkbox
+                check_indicator = tk.Label(
+                    item_frame,
+                    text="☐",
                     bg=self.BG_COLOR,
-                    fg=self.SECONDARY_FG,
-                    font=("Segoe UI", 8)
-                ).pack(side="left", padx=(0, 3))
+                    fg=self.ACCENT_COLOR,
+                    font=("Segoe UI", 10, "bold"),
+                    width=2,
+                    anchor="center"
+                )
+                check_indicator.grid(row=0, column=0, sticky="ns", padx=3)
+                check_indicator.bind("<Button-1>", create_checkbox_handler(mod_name))
+                if not hasattr(self, 'check_indicators'):
+                    self.check_indicators = {}
+                self.check_indicators[mod_name] = check_indicator
                 
-                dl_label = tk.Label(
-                    dl_frame,
-                    text=f"{mod.downloads:,}",
+                # Mod name (title + internal name)
+                name_text = f"{mod.title or mod.name}"
+                if mod.name != (mod.title or mod.name):
+                    name_text += f"\n({mod.name})"
+                
+                name_label = tk.Label(
+                    item_frame,
+                    text=name_text,
                     bg=self.BG_COLOR,
                     fg=self.FG_COLOR,
-                    font=("Segoe UI", 8)
+                    font=("Segoe UI", 9, "bold"),
+                    anchor="w",
+                    justify="left"
                 )
-                dl_label.pack(side="left")
+                name_label.grid(row=0, column=1, sticky="ew", padx=5, pady=3)
+                name_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Status
+                status_label = tk.Label(
+                    item_frame,
+                    text=status_text,
+                    bg=self.BG_COLOR,
+                    fg=status_color,
+                    font=("Segoe UI", 9),
+                    anchor="center",
+                    width=STATUS_WIDTH
+                )
+                status_label.grid(row=0, column=2, sticky="ew", padx=3, pady=3)
+                status_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Version
+                version_text = f"{mod.version} → {mod.latest_version or '?'}"
+                version_label = tk.Label(
+                    item_frame,
+                    text=version_text,
+                    bg=self.BG_COLOR,
+                    fg=self.SECONDARY_FG,
+                    font=("Segoe UI", 8),
+                    anchor="center",
+                    width=VERSION_WIDTH
+                )
+                version_label.grid(row=0, column=3, sticky="ew", padx=3, pady=3)
+                version_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Author
+                author_text = f"by {mod.author}" if mod.author else "Unknown"
+                author_label = tk.Label(
+                    item_frame,
+                    text=author_text,
+                    bg=self.BG_COLOR,
+                    fg=self.SECONDARY_FG,
+                    font=("Segoe UI", 8),
+                    anchor="w"
+                )
+                author_label.grid(row=0, column=4, sticky="ew", padx=5, pady=3)
+                author_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Downloads
+                dl_text = f"{mod.downloads:,}" if mod.downloads else "0"
+                dl_label = tk.Label(
+                    item_frame,
+                    text=dl_text,
+                    bg=self.BG_COLOR,
+                    fg=self.FG_COLOR,
+                    font=("Segoe UI", 8),
+                    anchor="center",
+                    width=12
+                )
+                dl_label.grid(row=0, column=5, sticky="ew", padx=3, pady=3)
                 dl_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-        
-        # Bind scroll to all widgets after creating
-        self._bind_scroll_recursive(self.mods_frame)
+                
+                mod_items.append((item_frame, mod_name))
+            
+            # Render all items at once
+            for idx, (item_frame, mod_name) in enumerate(mod_items):
+                item_frame.pack(fill="x", pady=2)
+                
+        finally:
+            # Re-enable canvas
+            try:
+                self.mods_canvas.config(state="normal")
+            except:
+                pass
+            # Force UI update
+            self.mods_frame.update_idletasks()
+            # Bind scroll to all mod widgets
+            self._bind_scroll_recursive(self.mods_frame)
+            # Focus canvas to enable mousewheel scroll
+            try:
+                self.mods_canvas.focus_set()
+            except:
+                pass
+            self._refresh_selection_display()
+    
+
     
     def _refresh_selection_display(self) -> None:
         """Update visual display of selected mods."""
@@ -706,240 +865,187 @@ class CheckerTab:
     
     def _filter_mods(self) -> None:
         """Filter and display mods based on search query and status filter."""
-        query = self.filter_var.get().lower()
+        query = self.search_entry.get_text().lower() if hasattr(self, 'search_entry') else ""
         filter_mode = self.filter_mode.get()
         sort_by = self.sort_var.get() if hasattr(self, 'sort_var') else "name"
         
-        # Clear frame
-        for widget in self.mods_frame.winfo_children():
-            widget.destroy()
+        # Clear frame - use safer widget destruction
+        try:
+            for widget in list(self.mods_frame.winfo_children()):  # Create list copy to avoid iteration issues
+                try:
+                    widget.destroy()
+                except:
+                    pass  # Widget already destroyed, skip
+        except:
+            pass  # Frame was destroyed, skip cleanup
+        
         self.mod_widgets.clear()
         if hasattr(self, 'check_indicators'):
             self.check_indicators.clear()
         
         # Scroll to top when filter changes
-        self.mods_canvas.yview_moveto(0)
+        try:
+            self.mods_canvas.yview_moveto(0)
+        except:
+            pass  # Canvas was destroyed, skip
         
-        # Get filtered mods list
-        filtered_mods = []
-        for mod_name in self.mods.keys():
-            mod = self.mods[mod_name]
-            
-            # Text search filter
-            if query and not (query in mod.name.lower() or 
-                            query in (mod.title or "").lower() or
-                            query in mod.author.lower()):
-                continue
-            
-            # Status filter
-            if filter_mode == "outdated" and mod.status != ModStatus.OUTDATED:
-                continue
-            elif filter_mode == "up_to_date" and mod.status != ModStatus.UP_TO_DATE:
-                continue
-            elif filter_mode == "selected" and mod_name not in self.selected_mods:
-                continue
-            
-            filtered_mods.append((mod_name, mod))
+        # Get filtered and sorted mods from presenter
+        filtered_mods = self.presenter.filter_mods(
+            self.mods, query, filter_mode, self.selected_mods, sort_by
+        )
         
-        # Sort mods
-        if sort_by == "name":
-            filtered_mods.sort(key=lambda x: x[0].lower())
-        elif sort_by == "version":
-            filtered_mods.sort(key=lambda x: x[1].version, reverse=True)
-        elif sort_by == "downloads":
-            filtered_mods.sort(key=lambda x: x[1].downloads or 0, reverse=True)
-        elif sort_by == "date":
-            filtered_mods.sort(key=lambda x: x[1].release_date or datetime.min, reverse=True)
+        # Column widths for alignment (SAME AS _populate_mods_list)
+        CHECKBOX_WIDTH = 2
+        STATUS_WIDTH = 12
+        VERSION_WIDTH = 15
         
-        # Display sorted and filtered mods
-        for mod_name, mod in filtered_mods:
-            
-            # Text search filter
-            if query and not (query in mod.name.lower() or 
-                            query in (mod.title or "").lower() or
-                            query in mod.author.lower()):
-                continue
-            
-            # Status filter
-            if filter_mode == "outdated" and mod.status != ModStatus.OUTDATED:
-                continue
-            elif filter_mode == "up_to_date" and mod.status != ModStatus.UP_TO_DATE:
-                continue
-            elif filter_mode == "selected" and mod_name not in self.selected_mods:
-                continue
-            
-            # Determine status icon/color
-            status_map = {
-                ModStatus.UP_TO_DATE: ("✓ Up to date", self.SUCCESS_COLOR),
-                ModStatus.OUTDATED: ("⬆️  Outdated", self.WARNING_COLOR),
-                ModStatus.UNKNOWN: ("❓ Unknown", self.SECONDARY_FG),
-                ModStatus.ERROR: ("✗ Error", self.ERROR_COLOR),
-            }
-            status_text, status_color = status_map.get(mod.status, ("❓ Unknown", self.SECONDARY_FG))
-            
-            # Create mod item frame (entire row is clickable)
-            item_frame = tk.Frame(self.mods_frame, bg=self.BG_COLOR, relief="solid", bd=1, cursor="hand2")
-            item_frame.pack(fill="x", pady=2)
-            
-            # Store widget reference for selection
-            self.mod_widgets[mod_name] = item_frame
-            
-            # Handler for row clicks (Ctrl behavior applies)
-            def create_row_click_handler(mod_n, frame):
-                def on_click(event):
-                    ctrl_pressed = event.state & 0x4  # Check Ctrl key
-                    if not ctrl_pressed and self.selected_mods:
-                        # No Ctrl, deselect others
-                        self.selected_mods.clear()
-                    
-                    # Toggle current selection
-                    if mod_n in self.selected_mods:
-                        self.selected_mods.discard(mod_n)
-                    else:
-                        self.selected_mods.add(mod_n)
-                    
-                    # Refresh display to show selection
-                    self._refresh_selection_display()
-                
-                return on_click
-            
-            # Handler for checkbox clicks (no Ctrl needed, just toggle)
-            def create_checkbox_handler(mod_n):
-                def on_click(event):
-                    # Simply toggle without deselecting others
-                    if mod_n in self.selected_mods:
-                        self.selected_mods.discard(mod_n)
-                    else:
-                        self.selected_mods.add(mod_n)
-                    
-                    # Refresh display to show selection
-                    self._refresh_selection_display()
-                
-                return on_click
-            
-            item_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Info frame
-            info_frame = tk.Frame(item_frame, bg=self.BG_COLOR)
-            info_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-            info_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Checkbox indicator (shows selection status)
-            check_indicator = tk.Label(
-                info_frame,
-                text="☑" if mod_name in self.selected_mods else "☐",
-                bg=self.BG_COLOR,
-                fg=self.SUCCESS_COLOR if mod_name in self.selected_mods else self.ACCENT_COLOR,
-                font=("Segoe UI", 11, "bold"),
-                width=2
-            )
-            check_indicator.pack(side="left", padx=(0, 10))
-            # Checkbox has independent toggle behavior (no Ctrl needed)
-            check_indicator.bind("<Button-1>", create_checkbox_handler(mod_name))
-            # Store reference for updating
-            if not hasattr(self, 'check_indicators'):
-                self.check_indicators = {}
-            self.check_indicators[mod_name] = check_indicator
-            
-            # Mod name and info
-            name_text = f"{mod.title or mod.name} ({mod.name})"
-            name_label = tk.Label(
-                info_frame,
-                text=name_text,
-                bg=self.BG_COLOR,
-                fg=self.FG_COLOR,
-                font=("Segoe UI", 9, "bold"),
-                anchor="w"
-            )
-            name_label.pack(side="left", fill="x", expand=True)
-            name_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Status
-            status_label = tk.Label(
-                info_frame,
-                text=status_text,
-                bg=self.BG_COLOR,
-                fg=status_color,
-                font=("Segoe UI", 9),
-                width=15,
-                anchor="center"
-            )
-            status_label.pack(side="left", padx=5)
-            status_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Version info
-            version_text = f"{mod.version} → {mod.latest_version or '?'}"
-            version_label = tk.Label(
-                info_frame,
-                text=version_text,
+        # Display filtered mods using GRID layout (SAME AS _populate_mods_list)
+        if not filtered_mods:
+            placeholder = tk.Label(
+                self.mods_frame,
+                text="No mods match the current filter",
                 bg=self.BG_COLOR,
                 fg=self.SECONDARY_FG,
-                font=("Segoe UI", 8),
-                width=20,
-                anchor="center"
+                font=("Segoe UI", 10)
             )
-            version_label.pack(side="left", padx=5)
-            version_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Author label and value
-            author_frame = tk.Frame(info_frame, bg=self.BG_COLOR)
-            author_frame.pack(side="left", padx=5)
-            author_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            tk.Label(
-                author_frame,
-                text="Author:",
-                bg=self.BG_COLOR,
-                fg=self.SECONDARY_FG,
-                font=("Segoe UI", 8)
-            ).pack(side="left", padx=(0, 3))
-            
-            author_label = tk.Label(
-                author_frame,
-                text=mod.author,
-                bg=self.BG_COLOR,
-                fg=self.FG_COLOR,
-                font=("Segoe UI", 8)
-            )
-            author_label.pack(side="left")
-            author_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
-            
-            # Downloads label and value
-            if mod.downloads:
-                dl_frame = tk.Frame(info_frame, bg=self.BG_COLOR)
-                dl_frame.pack(side="left", padx=5)
-                dl_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+            placeholder.pack(pady=20)
+        else:
+            # Render all filtered mods with grid layout
+            for mod_name, mod in filtered_mods:
+                status_text, status_color = self.presenter.get_status_text_and_color(mod.status)
                 
-                tk.Label(
-                    dl_frame,
-                    text="Downloads:",
+                # Create item frame with grid layout
+                item_frame = tk.Frame(self.mods_frame, bg=self.BG_COLOR, relief="solid", bd=1, cursor="hand2")
+                item_frame.pack(fill="x", pady=2)
+                item_frame.columnconfigure(1, weight=1)  # Make name column expandable
+                
+                self.mod_widgets[mod_name] = item_frame
+                
+                # Create click handlers
+                def create_row_click_handler(mod_n, frame):
+                    def on_click(event):
+                        ctrl_pressed = event.state & 0x4
+                        if not ctrl_pressed and self.selected_mods:
+                            self.selected_mods.clear()
+                        if mod_n in self.selected_mods:
+                            self.selected_mods.discard(mod_n)
+                        else:
+                            self.selected_mods.add(mod_n)
+                        self._refresh_selection_display()
+                    return on_click
+                
+                def create_checkbox_handler(mod_n):
+                    def on_click(event):
+                        if mod_n in self.selected_mods:
+                            self.selected_mods.discard(mod_n)
+                        else:
+                            self.selected_mods.add(mod_n)
+                        self._refresh_selection_display()
+                    return on_click
+                
+                # Checkbox
+                check_indicator = tk.Label(
+                    item_frame,
+                    text="☐",
                     bg=self.BG_COLOR,
-                    fg=self.SECONDARY_FG,
-                    font=("Segoe UI", 8)
-                ).pack(side="left", padx=(0, 3))
+                    fg=self.ACCENT_COLOR,
+                    font=("Segoe UI", 11, "bold"),
+                    width=CHECKBOX_WIDTH
+                )
+                check_indicator.grid(row=0, column=0, sticky="w", padx=3, pady=3)
+                check_indicator.bind("<Button-1>", create_checkbox_handler(mod_name))
                 
-                dl_label = tk.Label(
-                    dl_frame,
-                    text=f"{mod.downloads:,}",
+                if not hasattr(self, 'check_indicators'):
+                    self.check_indicators = {}
+                self.check_indicators[mod_name] = check_indicator
+                
+                item_frame.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Mod name
+                name_text = f"{mod.title or mod.name} ({mod.name})"
+                name_label = tk.Label(
+                    item_frame,
+                    text=name_text,
                     bg=self.BG_COLOR,
                     fg=self.FG_COLOR,
-                    font=("Segoe UI", 8)
+                    font=("Segoe UI", 9, "bold"),
+                    anchor="w",
+                    justify="left"
                 )
-                dl_label.pack(side="left")
+                name_label.grid(row=0, column=1, sticky="ew", padx=5, pady=3)
+                name_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Status
+                status_label = tk.Label(
+                    item_frame,
+                    text=status_text,
+                    bg=self.BG_COLOR,
+                    fg=status_color,
+                    font=("Segoe UI", 9),
+                    anchor="center",
+                    width=STATUS_WIDTH
+                )
+                status_label.grid(row=0, column=2, sticky="ew", padx=3, pady=3)
+                status_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Version
+                version_text = f"{mod.version} → {mod.latest_version or '?'}"
+                version_label = tk.Label(
+                    item_frame,
+                    text=version_text,
+                    bg=self.BG_COLOR,
+                    fg=self.SECONDARY_FG,
+                    font=("Segoe UI", 8),
+                    anchor="center",
+                    width=VERSION_WIDTH
+                )
+                version_label.grid(row=0, column=3, sticky="ew", padx=3, pady=3)
+                version_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Author
+                author_label = tk.Label(
+                    item_frame,
+                    text=mod.author,
+                    bg=self.BG_COLOR,
+                    fg=self.FG_COLOR,
+                    font=("Segoe UI", 8),
+                    anchor="w"
+                )
+                author_label.grid(row=0, column=4, sticky="ew", padx=3, pady=3)
+                author_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
+                
+                # Downloads
+                dl_text = f"{mod.downloads:,}" if mod.downloads else "0"
+                dl_label = tk.Label(
+                    item_frame,
+                    text=dl_text,
+                    bg=self.BG_COLOR,
+                    fg=self.FG_COLOR,
+                    font=("Segoe UI", 8),
+                    anchor="center",
+                    width=12
+                )
+                dl_label.grid(row=0, column=5, sticky="ew", padx=3, pady=3)
                 dl_label.bind("<Button-1>", create_row_click_handler(mod_name, item_frame))
         
-        # Bind scroll to all widgets after creating
+        # Bind scroll to all widgets
         self._bind_scroll_recursive(self.mods_frame)
+    
+
     
     def _on_tab_visible(self, event=None) -> None:
         """Called when tab becomes visible. Schedules auto-scan with delay."""
-        # Cancel any existing auto-scan timer
+        # Only schedule if not already scheduled and no mods loaded
+        if self.auto_scan_scheduled or self.mods or self.is_scanning:
+            return
+        
+        # Cancel any existing timer first
         if self.auto_scan_timer:
             self.parent.after_cancel(self.auto_scan_timer)
         
-        # Schedule auto-scan after 5 second delay to avoid rapid re-scans
-        if not self.is_scanning and not self.mods:
-            self.auto_scan_timer = self.parent.after(5000, self._start_scan)
+        # Mark as scheduled and schedule auto-scan after 3 second delay
+        self.auto_scan_scheduled = True
+        self.auto_scan_timer = self.parent.after(3000, self._start_scan)
 
     def _start_scan(self) -> None:
         """Start scanning mods in background."""
@@ -949,6 +1055,7 @@ class CheckerTab:
             messagebox.showerror("Error", "Please select a mods folder")
             return
         
+        self.is_scanning = True
         self.scan_btn.config(state="disabled")
         self.check_btn.config(state="disabled")
         self.update_btn.config(state="disabled")
@@ -965,30 +1072,25 @@ class CheckerTab:
         """Background thread for scanning mods."""
         try:
             self._update_status("Scanning mods...", self.ACCENT_COLOR)
-            self.progress_log.config(state="normal")
-            self.progress_log.delete("1.0", "end")
-            self.progress_log.config(state="normal")
-            
             self._log_progress("[SCAN] Starting mod scan...", "info")
             
-            # Create checker
+            # Create checker and logic layer
             username = config.get("username")
             token = config.get("token")
-            
             self.checker = ModChecker(mods_folder, username, token)
             self.checker.set_progress_callback(lambda msg: self._log_progress(msg, "normal"))
+            self.logic = CheckerLogic(self.checker, self._log_progress)
             
-            # Scan mods (this now also fetches portal data)
-            self.mods = self.checker.scan_mods()
+            # Scan mods using logic layer
+            self.mods = self.logic.scan_mods()
             
             # Update UI
             self._populate_mods_list()
             self._update_stats()
             
-            self._log_progress(f"[SCAN] ✓ Complete! Found {len(self.mods)} mod(s)", "success")
             self._update_status(f"Ready - {len(self.mods)} mods", self.SUCCESS_COLOR)
-            
-            messagebox.showinfo("Scan Complete", f"Found {len(self.mods)} mod(s)\n\nStatus, versions, and download counts are now available!")
+            # Delay messagebox to ensure status bar updates first
+            self.frame.after(500, lambda: messagebox.showinfo("Scan Complete", f"Found {len(self.mods)} mod(s)\n\nStatus, versions, and download counts are now available!"))
         
         except Exception as e:
             self._log_progress(f"[SCAN] ✗ Error: {e}", "error")
@@ -996,6 +1098,8 @@ class CheckerTab:
             messagebox.showerror("Error", f"Scan failed: {e}")
         
         finally:
+            self.is_scanning = False
+            self.auto_scan_scheduled = False  # Reset flag so auto-scan can run again if tab becomes visible
             self.scan_btn.config(state="normal")
             self.check_btn.config(state="normal")
             self.update_btn.config(state="normal")
@@ -1021,17 +1125,19 @@ class CheckerTab:
             self._update_status("Checking for updates...", self.ACCENT_COLOR)
             self._log_progress("[CHECK] Starting update check...", "info")
             
-            if not self.checker:
-                raise RuntimeError("Checker not initialized. Please scan mods first.")
+            if not self.logic:
+                raise RuntimeError("Logic layer not initialized. Please scan mods first.")
             
-            self.checker.check_updates()
+            outdated, was_refreshed = self.logic.check_updates()
             self._populate_mods_list()
             self._update_stats()
             
-            self._log_progress("[CHECK] ✓ Update check complete!", "success")
             self._update_status("Ready", self.SUCCESS_COLOR)
             
-            messagebox.showinfo("Check Complete", "Update check finished")
+            if was_refreshed:
+                messagebox.showinfo("Check Complete", f"Check finished. {len(outdated)} update(s) available")
+            else:
+                messagebox.showinfo("Check Complete", "Data is fresh. No refresh needed.")
         
         except Exception as e:
             self._log_progress(f"[CHECK] ✗ Error: {e}", "error")
@@ -1087,21 +1193,14 @@ class CheckerTab:
             self._update_status("Updating mods...", self.ACCENT_COLOR)
             self._log_progress(f"[UPDATE] Starting update of {len(mod_names)} mod(s)...", "info")
             
-            if not self.checker:
-                raise RuntimeError("Checker not initialized. Please scan mods first.")
+            if not self.logic:
+                raise RuntimeError("Logic layer not initialized. Please scan mods first.")
             
-            successful, failed = self.checker.update_mods(mod_names)
+            successful, failed = self.logic.update_mods(mod_names)
             
             # Update UI
             self._populate_mods_list()
             self._update_stats()
-            
-            success_msg = f"[UPDATE] ✓ Updated {len(successful)} mod(s)"
-            self._log_progress(success_msg, "success")
-            
-            if failed:
-                fail_msg = f"[UPDATE] ✗ Failed: {', '.join(failed)}"
-                self._log_progress(fail_msg, "error")
             
             self._update_status("Ready", self.SUCCESS_COLOR)
             
@@ -1152,41 +1251,18 @@ class CheckerTab:
             self._update_status("Deleting mods...", self.WARNING_COLOR)
             self._log_progress(f"[DELETE] Deleting {len(mod_names)} mod(s)...", "warning")
             
-            deleted = []
-            failed = []
+            if not self.logic:
+                raise RuntimeError("Logic layer not initialized.")
             
-            for i, mod_name in enumerate(mod_names, 1):
-                try:
-                    if mod_name not in self.mods:
-                        failed.append(f"{mod_name} (not found)")
-                        continue
-                    
-                    mod = self.mods[mod_name]
-                    mod_file = Path(self.folder_var.get()) / f"{mod.name}_{mod.version}.zip"
-                    
-                    if mod_file.exists():
-                        mod_file.unlink()
-                        deleted.append(mod_name)
-                        self._log_progress(f"  [{i}/{len(mod_names)}] ✓ Deleted {mod_name}", "success")
-                    else:
-                        failed.append(f"{mod_name} (file not found)")
-                        self._log_progress(f"  [{i}/{len(mod_names)}] ✗ File not found: {mod_name}", "error")
-                
-                except Exception as e:
-                    failed.append(f"{mod_name} ({str(e)})")
-                    self._log_progress(f"  [{i}/{len(mod_names)}] ✗ Error: {mod_name} - {e}", "error")
+            deleted, failed = self.logic.delete_mods(mod_names, self.folder_var.get())
             
-            # Remove from mods dict
+            # Remove from mods dict (already done in logic, but sync UI)
             for name in deleted:
-                del self.mods[name]
+                self.mods.pop(name, None)
             
             # Update UI
             self._populate_mods_list()
             self._update_stats()
-            
-            self._log_progress(f"[DELETE] ✓ Complete! Deleted {len(deleted)} mod(s)", "success")
-            if failed:
-                self._log_progress(f"[DELETE] ✗ Failed: {len(failed)} mod(s)", "error")
             
             self._update_status("Ready", self.SUCCESS_COLOR)
             
@@ -1246,15 +1322,10 @@ class CheckerTab:
             self._update_status("Cleaning backups...", self.WARNING_COLOR)
             self._log_progress(f"[CLEANUP] Deleting backup folder...", "warning")
             
-            # Calculate folder size before deletion
-            folder_size = sum(f.stat().st_size for f in backup_folder.rglob("*") if f.is_file())
-            folder_size_mb = folder_size / (1024 * 1024)
+            if not self.logic:
+                raise RuntimeError("Logic layer not initialized.")
             
-            # Delete folder and contents
-            import shutil
-            shutil.rmtree(backup_folder)
-            
-            self._log_progress(f"[CLEANUP] ✓ Complete! Deleted backup folder, freed {folder_size_mb:.2f} MB", "success")
+            folder_size_mb = self.logic.clean_backups(str(backup_folder))
             self._update_status("Ready", self.SUCCESS_COLOR)
             
             msg = f"Deleted backup folder\nFreed {folder_size_mb:.2f} MB"
@@ -1291,6 +1362,9 @@ class CheckerTab:
     def _backup_thread(self, mod_names: List[str], backup_folder: str) -> None:
         """Background thread for backing up mods."""
         try:
+            if not self.checker:
+                raise RuntimeError("Checker not initialized. Please scan mods first.")
+            
             self._update_status("Backing up mods...", self.ACCENT_COLOR)
             self._log_progress(f"[BACKUP] Backing up {len(mod_names)} mod(s) to {backup_folder}...", "info")
             

@@ -1,0 +1,1 @@
+pyinstaller FactorioModManager.spec --clean

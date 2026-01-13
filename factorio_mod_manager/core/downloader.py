@@ -41,10 +41,22 @@ class ModDownloader:
         
         # Callback for progress updates
         self.progress_callback: Optional[Callable] = None
+        # Callback for per-mod status updates: (mod_name, status, progress_pct)
+        self.mod_progress_callback: Optional[Callable] = None
+        # Callback for overall download progress: (completed, total)
+        self.overall_progress_callback: Optional[Callable] = None
 
     def set_progress_callback(self, callback: Callable) -> None:
         """Set callback for progress updates."""
         self.progress_callback = callback
+    
+    def set_mod_progress_callback(self, callback: Callable) -> None:
+        """Set callback for per-mod progress updates."""
+        self.mod_progress_callback = callback
+    
+    def set_overall_progress_callback(self, callback: Callable) -> None:
+        """Set callback for overall download progress."""
+        self.overall_progress_callback = callback
 
     def _log_progress(self, message: str) -> None:
         """Log progress message."""
@@ -320,6 +332,20 @@ class ModDownloader:
                 self._log_progress(f"  - {incompat}")
             self._log_progress(f"  These mods conflict with selected mods.")
         
+        # Check conflicts with already installed mods
+        installed_mods = self.get_installed_mods()
+        conflicts_with_installed = []
+        
+        for mod_name in all_incompatibilities:
+            if mod_name in installed_mods:
+                conflicts_with_installed.append(f"{mod_name} (installed)")
+        
+        if conflicts_with_installed:
+            self._log_progress(f"\n⚠️  WARNING: Conflicts with installed mods:")
+            for conflict in conflicts_with_installed:
+                self._log_progress(f"  ⚠️  {conflict}")
+            self._log_progress(f"  Installing may cause issues. Proceed with caution!")
+        
         # Check for expansion requirements
         if all_expansions:
             self._log_progress(f"\n💿 Required DLC Expansions:")
@@ -334,9 +360,14 @@ class ModDownloader:
             total_deps = len(mod.dependencies) + len(mod.optional_dependencies)
             dep_info = f" ({total_deps} deps)" if total_deps > 0 else ""
             self._log_progress(f"  - {mod_name}{dep_info}")
+            # Notify UI to add progress item for each mod
+            if self.mod_progress_callback:
+                self.mod_progress_callback(mod_name, "⏳ Starting...", 0)
         
         # Download all mods
         downloaded = []
+        completed = 0
+        total = len(all_mods)
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
@@ -349,10 +380,20 @@ class ModDownloader:
                 try:
                     if future.result():
                         downloaded.append(mod)
+                        if self.mod_progress_callback:
+                            self.mod_progress_callback(mod.name, "✓ Downloaded", 100)
                     else:
                         failed.append(mod.name)
+                        if self.mod_progress_callback:
+                            self.mod_progress_callback(mod.name, "✗ Failed", 0)
                 except Exception as e:
                     self._log_progress(f"Error downloading {mod.name}: {e}")
                     failed.append(mod.name)
+                    if self.mod_progress_callback:
+                        self.mod_progress_callback(mod.name, f"✗ Error: {e}", 0)
+                finally:
+                    completed += 1
+                    if self.overall_progress_callback:
+                        self.overall_progress_callback(completed, total)
         
         return downloaded, failed

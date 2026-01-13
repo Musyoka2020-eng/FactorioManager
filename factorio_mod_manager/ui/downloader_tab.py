@@ -7,6 +7,7 @@ import time
 from ..core import ModDownloader
 from ..core.portal import FactorioPortalAPI
 from ..utils import config, validate_mod_url, format_file_size
+from .widgets import PlaceholderEntry
 
 
 class DownloaderTab:
@@ -21,20 +22,23 @@ class DownloaderTab:
     SUCCESS_COLOR = "#4ec952"
     ERROR_COLOR = "#d13438"
 
-    def __init__(self, parent: ttk.Notebook):
+    def __init__(self, parent: ttk.Notebook, status_manager=None):
         """
         Initialize downloader tab.
         
         Args:
             parent: Parent notebook widget
+            status_manager: StatusManager for updating main window status bar
         """
         self.frame = ttk.Frame(parent, style="Dark.TFrame")
         self.parent = parent
+        self.status_manager = status_manager  # Reference to status manager
         self.downloader: Optional[ModDownloader] = None
         self.portal = FactorioPortalAPI()
         self.is_downloading = False
         self.last_search_time = 0
         self.search_timer = None
+        self.mod_progress_widgets = {}  # Store individual mod progress widgets
         
         self._setup_ui()
     
@@ -42,13 +46,12 @@ class DownloaderTab:
         """Setup the UI components."""
         # Create main scrollable area
         main_scroll = ttk.Scrollbar(self.frame)
-        main_scroll.pack(side="right", fill="y")
         
         canvas = tk.Canvas(
             self.frame,
             bg=self.BG_COLOR,
             highlightthickness=0,
-            yscrollcommand=main_scroll.set
+            yscrollcommand=self._on_canvas_scroll
         )
         canvas.pack(side="left", fill="both", expand=True)
         main_scroll.config(command=canvas.yview)
@@ -57,10 +60,15 @@ class DownloaderTab:
         content_frame = tk.Frame(canvas, bg=self.BG_COLOR)
         canvas.create_window((0, 0), window=content_frame, anchor="nw", tags="content_frame")
         
+        self._main_scrollbar = main_scroll
+        self._scrollbar_visible = False
+        
         def on_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
             # Make canvas window width match canvas width
             canvas.itemconfig("content_frame", width=event.width)
+            # Check if scrollbar should be visible
+            self._update_scrollbar_visibility(canvas)
         
         canvas.bind("<Configure>", on_configure)
         
@@ -71,8 +79,8 @@ class DownloaderTab:
         # Enable mouse wheel scrolling
         def _on_mousewheel(event):
             try:
-                # Check if canvas still exists
-                if self._scroll_canvas.winfo_exists():
+                # Check if canvas still exists and is scrollable
+                if self._scroll_canvas.winfo_exists() and self._is_canvas_scrollable():
                     self._scroll_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
             except:
                 pass  # Widget was destroyed, ignore
@@ -80,7 +88,7 @@ class DownloaderTab:
         
         def _on_mousewheel_linux(event):
             try:
-                if self._scroll_canvas.winfo_exists():
+                if self._scroll_canvas.winfo_exists() and self._is_canvas_scrollable():
                     if event.num == 4:
                         self._scroll_canvas.yview_scroll(-3, "units")
                     elif event.num == 5:
@@ -125,8 +133,10 @@ class DownloaderTab:
         )
         url_label.pack(anchor="w")
         
-        self.url_entry = tk.Entry(
+        self.url_entry = PlaceholderEntry(
             input_frame,
+            placeholder="https://mods.factorio.com/mod/",
+            placeholder_color="#666666",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
             insertbackground=self.FG_COLOR,
@@ -135,7 +145,6 @@ class DownloaderTab:
             font=("Segoe UI", 10)
         )
         self.url_entry.pack(fill="x", padx=15, pady=(5, 10))
-        self.url_entry.insert(0, "https://mods.factorio.com/mod/")
         
         # Bind URL changes to trigger search
         self.url_entry.bind("<KeyRelease>", lambda e: self._schedule_search())
@@ -195,26 +204,28 @@ class DownloaderTab:
         )
         info_header.pack(anchor="w", padx=15, pady=(10, 5))
         
-        # Info display area with scrollbar
+        # Info display area with optional scrollbar
         info_scroll_frame = tk.Frame(info_frame, bg=self.DARK_BG)
         info_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(0, 10))
         
-        info_scrollbar = tk.Scrollbar(info_scroll_frame)
-        info_scrollbar.pack(side="right", fill="y")
+        self.info_scrollbar = tk.Scrollbar(info_scroll_frame)
+        # Start with scrollbar hidden
+        self.info_scrollbar_visible = False
         
         self.mod_info_text = tk.Text(
             info_scroll_frame,
             height=8,
             bg=self.BG_COLOR,
             fg=self.SECONDARY_FG,
-            yscrollcommand=info_scrollbar.set,
+            yscrollcommand=self._on_info_scroll,
             font=("Segoe UI", 9),
             relief="flat",
             state="disabled",
             wrap="word"
         )
-        info_scrollbar.config(command=self.mod_info_text.yview)
+        self.info_scrollbar.config(command=self.mod_info_text.yview)
         self.mod_info_text.pack(fill="both", expand=True)
+        self.info_scroll_frame = info_scroll_frame
         
         # Configure text tags for colors
         self.mod_info_text.tag_configure("title", font=("Segoe UI", 11, "bold"), foreground=self.ACCENT_COLOR)
@@ -292,19 +303,37 @@ class DownloaderTab:
         )
         progress_header.pack(anchor="w", padx=15, pady=(10, 5))
         
-        # Progress bar
+        # Main progress bar
+        progress_info_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
+        progress_info_frame.pack(fill="x", padx=15, pady=(0, 0))
+        
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(
-            progress_frame,
+            progress_info_frame,
             variable=self.progress_var,
             maximum=100,
             mode="determinate"
         )
-        self.progress_bar.pack(fill="x", padx=15, pady=(5, 0))
+        self.progress_bar.pack(side="left", fill="both", expand=True, pady=(5, 0))
         
-        # Progress text area with scrollbar
-        scroll_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
-        scroll_frame.pack(fill="both", expand=True, padx=15, pady=(5, 10))
+        # Progress percentage label
+        self.progress_label = tk.Label(
+            progress_info_frame,
+            text="0%",
+            bg=self.DARK_BG,
+            fg=self.FG_COLOR,
+            font=("Segoe UI", 9, "bold"),
+            width=5
+        )
+        self.progress_label.pack(side="right", padx=(10, 0), pady=(5, 0))
+        
+        # Main content area with console on left and individual downloads on right
+        content_area = tk.Frame(progress_frame, bg=self.DARK_BG)
+        content_area.pack(fill="both", expand=True, padx=15, pady=(5, 10))
+        
+        # Progress text area with scrollbar (LEFT SIDE)
+        scroll_frame = tk.Frame(content_area, bg=self.DARK_BG)
+        scroll_frame.pack(side="left", fill="both", expand=True)
         
         scrollbar = tk.Scrollbar(scroll_frame)
         scrollbar.pack(side="right", fill="y")
@@ -329,6 +358,93 @@ class DownloaderTab:
         self.progress_text.tag_config("error", foreground=self.ERROR_COLOR)
         self.progress_text.tag_config("info", foreground=self.ACCENT_COLOR)
         self.progress_text.tag_config("warning", foreground="#ffad00")
+        
+        # Individual downloads sidebar (RIGHT SIDE)
+        sidebar_frame = tk.Frame(content_area, bg=self.DARK_BG, width=250)
+        sidebar_frame.pack(side="right", fill="both", padx=(10, 0))
+        sidebar_frame.pack_propagate(False)
+        
+        sidebar_header = tk.Label(
+            sidebar_frame,
+            text="📥 Downloads",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.DARK_BG,
+            fg=self.FG_COLOR
+        )
+        sidebar_header.pack(anchor="w", padx=5, pady=(5, 5))
+        
+        # Create a canvas with scrollbar for individual mod downloads
+        sidebar_scroll = tk.Scrollbar(sidebar_frame)
+        sidebar_scroll.pack(side="right", fill="y")
+        
+        self.mods_canvas = tk.Canvas(
+            sidebar_frame,
+            bg=self.BG_COLOR,
+            highlightthickness=0,
+            yscrollcommand=sidebar_scroll.set,
+            relief="solid",
+            borderwidth=1
+        )
+        self.mods_canvas.pack(side="left", fill="both", expand=True)
+        sidebar_scroll.config(command=self.mods_canvas.yview)
+        
+        # Frame inside canvas to hold individual mod progress items
+        self.mods_frame = tk.Frame(self.mods_canvas, bg=self.BG_COLOR)
+        self.mods_canvas_window = self.mods_canvas.create_window(
+            (0, 0), window=self.mods_frame, anchor="nw"
+        )
+        
+        def on_canvas_configure(event):
+            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
+            # Make frame width match canvas width
+            self.mods_canvas.itemconfig(self.mods_canvas_window, width=event.width)
+        
+        self.mods_canvas.bind("<Configure>", on_canvas_configure)
+        
+        # Bind frame configure event to update scroll region when items are added
+        def on_frame_configure(event):
+            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
+        
+        self.mods_frame.bind("<Configure>", on_frame_configure)
+        
+        # Bind mouse wheel to canvas for scrolling
+        def _on_mods_mousewheel(event):
+            try:
+                if self.mods_canvas.winfo_exists():
+                    self.mods_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass
+            return "break"
+        
+        def _on_mods_mousewheel_linux(event):
+            try:
+                if self.mods_canvas.winfo_exists():
+                    if event.num == 4:
+                        self.mods_canvas.yview_scroll(-3, "units")
+                    elif event.num == 5:
+                        self.mods_canvas.yview_scroll(3, "units")
+            except:
+                pass
+            return "break"
+        
+        self.mods_canvas.bind("<MouseWheel>", _on_mods_mousewheel)
+        self.mods_canvas.bind("<Button-4>", _on_mods_mousewheel_linux)
+        self.mods_canvas.bind("<Button-5>", _on_mods_mousewheel_linux)
+        
+        # Also bind to frame so scrolling works when hovering over items
+        self.mods_frame.bind("<MouseWheel>", _on_mods_mousewheel)
+        self.mods_frame.bind("<Button-4>", _on_mods_mousewheel_linux)
+        self.mods_frame.bind("<Button-5>", _on_mods_mousewheel_linux)
+        
+        # Store these for recursive binding to new items
+        self._mods_mousewheel = _on_mods_mousewheel
+        self._mods_mousewheel_linux = _on_mods_mousewheel_linux
+        
+        # Dictionary to store mod progress widgets
+        self.mod_progress_widgets = {}
+        
+        # Initial placeholder message
+        self.progress_text.insert("end", "Ready to download - enter a mod URL and click Download", "info")
         
         # Bind mouse wheel to all child widgets
         self._bind_mousewheel_to_children(self._scroll_content_frame)
@@ -367,6 +483,110 @@ class DownloaderTab:
         self.progress_text.see("end")
         self.progress_text.update_idletasks()
     
+    def _update_overall_progress(self, completed: int, total: int) -> None:
+        """Update overall download progress bar."""
+        if total == 0:
+            pct = 0
+        else:
+            pct = (completed / total) * 100
+        
+        self.progress_var.set(pct)
+        self.progress_label.config(text=f"{int(pct)}%")
+        self.progress_bar.update_idletasks()
+        
+        # Update main status bar
+        if self.status_manager:
+            status_msg = f"Downloading: {completed}/{total} mods ({int(pct)}%)"
+            self.status_manager.push_status(status_msg, "working")
+    
+    def _update_mod_download_progress(self, mod_name: str, status: str, progress_pct: int) -> None:
+        """Update progress for a specific mod download."""
+        # Ensure mod item exists
+        if mod_name not in self.mod_progress_widgets:
+            self._add_mod_progress_item(mod_name)
+        
+        # Update status
+        self._update_mod_status(mod_name, status)
+        
+        # Mark as complete if status indicates completion
+        if "✓" in status or "✗" in status:
+            success = "✓" in status
+            self._complete_mod_progress(mod_name, success)
+    
+    def _add_mod_progress_item(self, mod_name: str) -> None:
+        """Add a new mod to the individual downloads sidebar."""
+        if mod_name in self.mod_progress_widgets:
+            return
+        
+        # Create frame for this mod
+        mod_item = tk.Frame(self.mods_frame, bg=self.BG_COLOR, relief="solid", borderwidth=1)
+        mod_item.pack(fill="x", pady=3, padx=3)
+        
+        # Mod name label
+        name_label = tk.Label(
+            mod_item,
+            text=mod_name,
+            bg=self.BG_COLOR,
+            fg=self.FG_COLOR,
+            font=("Segoe UI", 9, "bold"),
+            wraplength=200,
+            justify="left"
+        )
+        name_label.pack(anchor="w", padx=5, pady=(5, 2))
+        
+        # Status/progress label
+        status_label = tk.Label(
+            mod_item,
+            text="Preparing...",
+            bg=self.BG_COLOR,
+            fg=self.SECONDARY_FG,
+            font=("Segoe UI", 8)
+        )
+        status_label.pack(anchor="w", padx=5, pady=(0, 3))
+        
+        # Store widgets
+        self.mod_progress_widgets[mod_name] = {
+            'frame': mod_item,
+            'name_label': name_label,
+            'status_label': status_label,
+        }
+        
+        # Bind mouse wheel to new items so scrolling works when hovering over them
+        mod_item.bind("<MouseWheel>", self._mods_mousewheel)
+        mod_item.bind("<Button-4>", self._mods_mousewheel_linux)
+        mod_item.bind("<Button-5>", self._mods_mousewheel_linux)
+        name_label.bind("<MouseWheel>", self._mods_mousewheel)
+        name_label.bind("<Button-4>", self._mods_mousewheel_linux)
+        name_label.bind("<Button-5>", self._mods_mousewheel_linux)
+        status_label.bind("<MouseWheel>", self._mods_mousewheel)
+        status_label.bind("<Button-4>", self._mods_mousewheel_linux)
+        status_label.bind("<Button-5>", self._mods_mousewheel_linux)
+        
+        # Update canvas scroll region
+        self.mods_frame.update_idletasks()
+        self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
+    
+    def _update_mod_status(self, mod_name: str, status: str) -> None:
+        """Update status for a specific mod."""
+        if mod_name not in self.mod_progress_widgets:
+            self._add_mod_progress_item(mod_name)
+        
+        widget = self.mod_progress_widgets[mod_name]
+        widget['status_label'].config(text=status)
+        widget['status_label'].update_idletasks()
+    
+    def _complete_mod_progress(self, mod_name: str, success: bool = True) -> None:
+        """Mark a mod as completed."""
+        if mod_name in self.mod_progress_widgets:
+            widget = self.mod_progress_widgets[mod_name]
+            if success:
+                widget['status_label'].config(text="✓ Downloaded", fg=self.SUCCESS_COLOR)
+                widget['name_label'].config(fg=self.SUCCESS_COLOR)
+            else:
+                widget['status_label'].config(text="✗ Failed", fg=self.ERROR_COLOR)
+                widget['name_label'].config(fg=self.ERROR_COLOR)
+            widget['status_label'].update_idletasks()
+    
     def _start_download(self) -> None:
         """Start downloading mods in background thread."""
         url = self.url_entry.get().strip()
@@ -374,23 +594,28 @@ class DownloaderTab:
         
         # Validate input
         if not url or url == "https://mods.factorio.com/mod/":
-            messagebox.showerror("Error", "Please enter a mod URL")
+            messagebox.showerror("Error", "Please enter a mod URL or mod name")
             return
         
-        if not validate_mod_url(url):
-            messagebox.showerror(
-                "Error",
-                "Invalid URL. Please use: https://mods.factorio.com/mod/ModName"
-            )
-            return
+        # If URL doesn't contain full path, treat it as mod name and auto-complete
+        if "/mod/" not in url:
+            # User entered just the mod name, construct full URL
+            mod_name = url.split("?")[0].strip()  # Remove query parameters
+        else:
+            # Validate full URL format
+            if not validate_mod_url(url):
+                messagebox.showerror(
+                    "Error",
+                    "Invalid URL. Please use: https://mods.factorio.com/mod/ModName"
+                )
+                return
+            # Extract mod name from URL (remove query parameters)
+            mod_name = url.split("/mod/")[-1].strip("/")
+            mod_name = mod_name.split("?")[0]  # Remove query parameters like ?from=search
         
         if not mods_folder:
             messagebox.showerror("Error", "Please select a mods folder")
             return
-        
-        # Extract mod name from URL (remove query parameters)
-        mod_name = url.split("/mod/")[-1].strip("/")
-        mod_name = mod_name.split("?")[0]  # Remove query parameters like ?from=search
         
         # Disable button and start download
         self.download_btn.config(state="disabled")
@@ -399,6 +624,11 @@ class DownloaderTab:
         # Clear progress
         self.progress_text.delete("1.0", "end")
         self.progress_var.set(0)
+        self.progress_label.config(text="0%")
+        self.mod_progress_widgets.clear()
+        # Clear mods frame
+        for widget in self.mods_frame.winfo_children():
+            widget.destroy()
         self._log_progress(f"Starting download for {mod_name}...\n", "info")
         
         # Start download in background thread
@@ -419,11 +649,21 @@ class DownloaderTab:
             # Create downloader
             self.downloader = ModDownloader(mods_folder, username, token)
             self.downloader.set_progress_callback(lambda msg: self._log_progress(msg, "info"))
+            self.downloader.set_overall_progress_callback(self._update_overall_progress)
+            self.downloader.set_mod_progress_callback(self._update_mod_download_progress)
+            
+            # Update main status bar
+            if self.status_manager:
+                self.status_manager.push_status("Resolving dependencies...", "working")
             
             self._log_progress("Resolving dependencies...", "info")
             
             # Download mod
             include_optional = self.include_optional_var.get()
+            
+            if self.status_manager:
+                self.status_manager.push_status("Starting download...", "working")
+            
             downloaded, failed = self.downloader.download_mods(
                 [mod_name],
                 include_optional=include_optional
@@ -433,15 +673,21 @@ class DownloaderTab:
             if downloaded:
                 msg = f"\n✓ Successfully downloaded {len(downloaded)} mod(s)"
                 self._log_progress(msg, "success")
+                if self.status_manager:
+                    self.status_manager.push_status(f"Downloaded {len(downloaded)} mod(s) successfully", "success")
                 messagebox.showinfo("Download Complete", msg.strip())
             
             if failed:
                 msg = f"\n✗ Failed to download: {', '.join(failed)}"
                 self._log_progress(msg, "error")
+                if self.status_manager:
+                    self.status_manager.push_status(f"Failed to download {len(failed)} mod(s)", "error")
         
         except Exception as e:
             msg = f"\n✗ Error: {e}"
             self._log_progress(msg, "error")
+            if self.status_manager:
+                self.status_manager.push_status(f"Download error: {e}", "error")
             messagebox.showerror("Error", f"Download failed: {e}")
         
         finally:
@@ -485,6 +731,43 @@ class DownloaderTab:
         try:
             # Fetch mod info from portal
             mod_data = self.portal.get_mod(mod_name)
+            
+            # Also resolve ALL dependencies (including optional) to show what COULD be downloaded
+            if mod_data:
+                from ..core.downloader import ModDownloader
+                from pathlib import Path
+                
+                # Get mods folder from UI
+                mods_folder = self.folder_var.get()
+                if mods_folder and Path(mods_folder).exists():
+                    downloader = ModDownloader(mods_folder)
+                else:
+                    downloader = ModDownloader("")  # Empty path, we're not downloading
+                
+                try:
+                    # Resolve dependencies WITH optional to show full dependency tree
+                    all_deps, incompats, expansions = downloader.resolve_dependencies(
+                        mod_name,
+                        include_optional=True,  # Include optional so user can see full tree
+                        visited=set()
+                    )
+                    # Store for display
+                    if 'resolved_dependencies' not in mod_data:
+                        mod_data['resolved_dependencies'] = list(all_deps.keys())
+                    if 'resolved_incompatibilities' not in mod_data:
+                        mod_data['resolved_incompatibilities'] = incompats
+                    if 'resolved_expansions' not in mod_data:
+                        mod_data['resolved_expansions'] = expansions
+                    
+                    # Check for conflicts with installed mods
+                    if mods_folder and Path(mods_folder).exists():
+                        installed_mods = downloader.get_installed_mods()
+                        conflicts = [m for m in incompats if m in installed_mods]
+                        if conflicts:
+                            mod_data['installed_conflicts'] = conflicts
+                except:
+                    pass  # If resolution fails, just show direct dependencies
+            
             self._display_mod_info(mod_data, mod_name)
         except Exception as e:
             self._display_mod_info(None, f"Error searching for mod: {e}")
@@ -606,10 +889,114 @@ class DownloaderTab:
                         self.mod_info_text.insert("end", "  💿 Requires DLC: ", "label")
                         self.mod_info_text.insert("end", ", ".join(expansions) + "\n", "error")
                 else:
-                    self.mod_info_text.insert("end", "✓ No dependencies\n", "success")
+                    self.mod_info_text.insert("end", "✓ No direct dependencies\n", "success")
+            
+            # Show all dependencies (including transitive ones) that will be downloaded
+            resolved_deps = mod_data.get('resolved_dependencies', [])
+            if resolved_deps:
+                self.mod_info_text.insert("end", "\n", "value")
+                self.mod_info_text.insert("end", "All Dependencies (including transitive):\n", "label")
+                # Remove the main mod from the list
+                resolved_mods = [m for m in resolved_deps if m != mod_name]
+                if resolved_mods:
+                    self.mod_info_text.insert("end", "  📦 " + ", ".join(sorted(resolved_mods)) + "\n", "info")
+                    self.mod_info_text.insert("end", f"  Total: {len(resolved_mods)} additional mod(s) will be downloaded\n", "success")
+                    self.mod_info_text.insert("end", "  (includes optional dependencies and their dependencies)\n", "warning")
+                else:
+                    self.mod_info_text.insert("end", "  ✓ Only this mod (no dependencies)\n", "success")
+            
+            resolved_incompats = mod_data.get('resolved_incompatibilities', [])
+            if resolved_incompats:
+                self.mod_info_text.insert("end", "\n⚠️  Incompatible with:\n", "warning")
+                self.mod_info_text.insert("end", "  " + ", ".join(resolved_incompats) + "\n", "error")
+            
+            # Check for conflicts with installed mods
+            installed_conflicts = mod_data.get('installed_conflicts', [])
+            if installed_conflicts:
+                self.mod_info_text.insert("end", "\n🚨 CONFLICTS WITH INSTALLED MODS:\n", "error")
+                for conflict in installed_conflicts:
+                    self.mod_info_text.insert("end", f"  ⚠️  {conflict} (already installed)\n", "error")
+                self.mod_info_text.insert("end", "  Installing this mod may cause issues!\n", "error")
             
         except Exception as e:
             self.mod_info_text.insert("end", f"Error displaying mod info: {e}", "error")
         
         finally:
             self.mod_info_text.config(state="disabled")
+    
+    def _on_info_scroll(self, first: float, last: float) -> None:
+        """Update scrollbar visibility based on content size."""
+        
+        # Show scrollbar only if content extends beyond visible area
+        needs_scroll = first > 0 or last < 1
+        
+        if needs_scroll and not self.info_scrollbar_visible:
+            # Content needs scrolling, show scrollbar
+            self.info_scrollbar.pack(side="right", fill="y")
+            self.info_scrollbar_visible = True
+        elif not needs_scroll and self.info_scrollbar_visible:
+            # Content doesn't need scrolling, hide scrollbar
+            self.info_scrollbar.pack_forget()
+            self.info_scrollbar_visible = False
+        
+        # Update scrollbar position
+        if self.info_scrollbar_visible:
+            self.info_scrollbar.set(first, last)
+    
+    def _is_canvas_scrollable(self) -> bool:
+        """Check if canvas content exceeds visible area and needs scrolling."""
+        try:
+            if not self._scroll_canvas.winfo_exists():
+                return False
+            
+            # Get the scroll region (total content size)
+            scroll_region = self._scroll_canvas.cget("scrollregion")
+            if not scroll_region:
+                return False
+            
+            # Parse scroll region: "x1 y1 x2 y2"
+            coords = list(map(float, scroll_region.split()))
+            content_height = coords[3] - coords[1]
+            
+            # Get visible canvas height
+            canvas_height = self._scroll_canvas.winfo_height()
+            
+            # Canvas is scrollable if content exceeds visible area
+            return content_height > canvas_height
+        except:
+            return False
+    
+    def _on_canvas_scroll(self, first: float, last: float) -> None:
+        """Update main scrollbar visibility based on canvas content size."""
+        # Show scrollbar only if content extends beyond visible area
+        needs_scroll = first > 0 or last < 1
+        
+        if needs_scroll and not self._scrollbar_visible:
+            # Content needs scrolling, show scrollbar
+            self._main_scrollbar.pack(side="right", fill="y")
+            self._scrollbar_visible = True
+        elif not needs_scroll and self._scrollbar_visible:
+            # Content doesn't need scrolling, hide scrollbar
+            self._main_scrollbar.pack_forget()
+            self._scrollbar_visible = False
+        
+        # Update scrollbar position
+        if self._scrollbar_visible:
+            self._main_scrollbar.set(first, last)
+    
+    def _update_scrollbar_visibility(self, canvas) -> None:
+        """Update scrollbar visibility based on current content size."""
+        try:
+            # Force an update to get accurate dimensions
+            canvas.update_idletasks()
+            
+            if self._is_canvas_scrollable():
+                if not self._scrollbar_visible:
+                    self._main_scrollbar.pack(side="right", fill="y")
+                    self._scrollbar_visible = True
+            else:
+                if self._scrollbar_visible:
+                    self._main_scrollbar.pack_forget()
+                    self._scrollbar_visible = False
+        except:
+            pass

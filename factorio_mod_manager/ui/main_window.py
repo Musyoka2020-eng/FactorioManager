@@ -1,8 +1,10 @@
 """Main application window."""
+import logging
 import tkinter as tk
 from tkinter import ttk, font
 from typing import Optional
 from queue import Queue
+from .status_manager import StatusManager
 from .downloader_tab import DownloaderTab
 from .checker_tab import CheckerTab
 from .logger_tab import LoggerTab
@@ -35,6 +37,7 @@ class MainWindow:
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         self.log_queue = log_queue
+        self.logger = logging.getLogger("factorio_mod_manager")
         
         self.root.configure(bg=self.BG_COLOR)
         
@@ -54,9 +57,16 @@ class MainWindow:
         self.notebook = ttk.Notebook(main_container, style="Dark.TNotebook")
         self.notebook.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
-        # Create tabs
-        self.downloader_tab = DownloaderTab(self.notebook)
-        self.checker_tab = CheckerTab(self.notebook)
+        # Create status bar first (so tabs can reference it)
+        self._create_status_bar()
+        
+        # Create and start status manager for concurrent tab operations
+        self.status_manager = StatusManager(self.update_status)
+        self.status_manager.start(self.root)
+        
+        # Create tabs and pass status manager reference
+        self.downloader_tab = DownloaderTab(self.notebook, status_manager=self.status_manager)
+        self.checker_tab = CheckerTab(self.notebook, logger=self.logger, status_manager=self.status_manager)
         
         self.notebook.add(self.downloader_tab.frame, text="⬇️  Downloader")
         self.notebook.add(self.checker_tab.frame, text="✓  Checker & Updates")
@@ -65,9 +75,6 @@ class MainWindow:
         if log_queue:
             self.logger_tab = LoggerTab(self.notebook, log_queue)
             self.notebook.add(self.logger_tab.frame, text="📋 Logs")
-        
-        # Status bar
-        self._create_status_bar()
     
     def _create_header(self) -> None:
         """Create application header."""
@@ -90,7 +97,7 @@ class MainWindow:
         subtitle_font = font.Font(family="Segoe UI", size=9)
         subtitle_label = tk.Label(
             header_frame,
-            text="Download mods with dependencies • Check for updates • Smart backups",
+            text="Download mods with dependencies • Check for updates • Manage your Factorio mods",
             font=subtitle_font,
             bg=self.DARK_BG,
             fg=self.SECONDARY_FG

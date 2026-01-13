@@ -6,29 +6,6 @@ from queue import Queue
 from typing import Optional
 
 
-class StreamRedirector:
-    """Redirect stdout/stderr to logger."""
-
-    def __init__(self, logger: logging.Logger, level: int = logging.INFO):
-        """Initialize stream redirector.
-        
-        Args:
-            logger: Logger to send output to
-            level: Logging level for redirected output
-        """
-        self.logger = logger
-        self.level = level
-
-    def write(self, message: str) -> None:
-        """Write message to logger."""
-        if message and message.strip():
-            self.logger.log(self.level, message.strip())
-
-    def flush(self) -> None:
-        """Flush operation (no-op)."""
-        pass
-
-
 class QueueHandler(logging.Handler):
     """Handler that puts log records into a queue for UI consumption."""
 
@@ -48,8 +25,7 @@ class QueueHandler(logging.Handler):
 def setup_logger(
     name: str,
     level: int = logging.INFO,
-    log_queue: Optional[Queue] = None,
-    redirect_stdout: bool = True
+    log_queue: Optional[Queue] = None
 ) -> logging.Logger:
     """Set up a logger with console and optional UI handlers.
     
@@ -57,7 +33,6 @@ def setup_logger(
         name: Logger name
         level: Logging level
         log_queue: Optional queue for UI logging
-        redirect_stdout: Whether to redirect stdout/stderr to logger
         
     Returns:
         Configured logger instance
@@ -86,11 +61,8 @@ def setup_logger(
         ui_handler.setLevel(level)
         ui_handler.setFormatter(formatter)
         logger.addHandler(ui_handler)
-    
-    # Redirect stdout/stderr to logger
-    if redirect_stdout:
-        sys.stdout = StreamRedirector(logger, logging.INFO)
-        sys.stderr = StreamRedirector(logger, logging.ERROR)
 
     return logger
+
+
 

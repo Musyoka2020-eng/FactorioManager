@@ -31,6 +31,7 @@ class ModChecker:
         self.portal = FactorioPortalAPI(username, token)
         self.downloader = ModDownloader(str(self.mods_folder), username, token)
         self.mods: Dict[str, Mod] = {}
+        self.last_update_check: Optional[datetime] = None
         
         # Callback for progress updates
         self.progress_callback: Optional[Callable] = None
@@ -136,21 +137,58 @@ class ModChecker:
                     mod.status = ModStatus.UNKNOWN
                     self.mods[mod_name] = mod
         
+        # Record when we last checked
+        self.last_update_check = datetime.now()
+        
         return self.mods
 
-    def check_updates(self) -> Dict[str, Mod]:
+    def check_updates(self, force_refresh: bool = False) -> tuple[Dict[str, Mod], bool]:
         """
-        Check for updates for all installed mods in parallel.
+        Check for updates for all installed mods.
+        
+        Uses cached data if last check was < 10 minutes ago (unless force_refresh=True).
+        
+        Args:
+            force_refresh: Force refresh from portal even if data is fresh
         
         Returns:
-            Dictionary of mods with updates available
+            Tuple of (outdated_mods_dict, was_refreshed_bool)
         """
-        self._log_progress("\nChecking for updates (parallel)...")
         outdated = {}
+        was_refreshed = False
         
         if not self.mods:
             self._log_progress("No mods installed")
-            return outdated
+            return outdated, was_refreshed
+        
+        # Check if data is fresh (< 10 minutes old)
+        now = datetime.now()
+        data_is_fresh = (
+            self.last_update_check is not None
+            and (now - self.last_update_check).total_seconds() < 600  # 10 minutes
+        )
+        
+        if data_is_fresh and not force_refresh:
+            # Use cached data
+            self._log_progress("\nUpdate check (using cached data)...")
+            for mod in self.mods.values():
+                if mod.is_outdated:
+                    outdated[mod.name] = mod
+            
+            # Show when data was last checked
+            if self.last_update_check is not None:
+                time_diff = (now - self.last_update_check).total_seconds()
+                mins = int(time_diff // 60)
+                secs = int(time_diff % 60)
+                time_str = f"{mins}m {secs}s ago" if mins > 0 else f"{secs}s ago"
+                self._log_progress(f"✓ Data is fresh ({time_str})")
+            self._log_progress(f"Updates available: {len(outdated)}")
+            
+            return outdated, was_refreshed
+        
+        # Refresh from portal
+        self._log_progress("\nChecking for updates (refreshing from portal)...")
+        was_refreshed = True
         
         # Fetch portal data in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -196,8 +234,11 @@ class ModChecker:
                     mod.status = ModStatus.ERROR
                     self._log_progress(f"  ✗ Error checking {mod_name}: {e}")
         
+        # Update timestamp and report
+        self.last_update_check = datetime.now()
         self._log_progress(f"\nUpdates available: {len(outdated)}")
-        return outdated
+        
+        return outdated, was_refreshed
 
     def update_mod(self, mod_name: str, current: int = 1, total: int = 1) -> bool:
         """
@@ -217,6 +258,16 @@ class ModChecker:
         
         mod = self.mods[mod_name]
         
+        # Check if mod is already up to date
+        if mod.version == mod.latest_version:
+            self._log_progress(f"  [{current}/{total}] ℹ {mod.name} {mod.version} - already up to date")
+            return False
+        
+        # Download new version
+        if not mod.latest_version:
+            self._log_progress(f"  [{current}/{total}] ℹ {mod.name} - no update available")
+            return False
+        
         # Backup current version
         if mod.file_path:
             try:
@@ -235,11 +286,6 @@ class ModChecker:
                 self._log_progress(f"  [{current}/{total}] ↻ Backed up {mod.name} {mod.version} to backup/")
             except Exception as e:
                 self._log_progress(f"  [{current}/{total}] ⚠ Warning backing up {mod.name}: {e}")
-        
-        # Download new version
-        if not mod.latest_version:
-            self._log_progress(f"  [{current}/{total}] ℹ {mod.name} - no update available")
-            return False
         
         self._log_progress(f"  [{current}/{total}] ⬇ Downloading {mod.name} {mod.version} → {mod.latest_version}...")
         
@@ -363,9 +409,25 @@ class ModChecker:
             backup_path = Path(backup_folder)
             backup_path.mkdir(parents=True, exist_ok=True)
             
-            # Copy mod to backup folder
+            # Verify source file exists
+            if not mod_file.exists():
+                self._log_progress(f"✗ Source mod file not found: {mod_file}")
+                return False
+            
+            # Copy mod to backup folder (not move - we want to keep the original)
             backup_file = backup_path / mod_file.name
-            shutil.copy2(mod_file, backup_file)
+            shutil.copy2(str(mod_file), str(backup_file))
+            
+            # Verify backup was created
+            if not backup_file.exists():
+                self._log_progress(f"✗ Backup file was not created: {backup_file}")
+                return False
+            
+            # Verify original file still exists
+            if not mod_file.exists():
+                self._log_progress(f"✗ Original mod file was removed during backup: {mod_file}")
+                return False
+            
             self._log_progress(f"✓ Backed up {mod_name} to {backup_file}")
             return True
         
