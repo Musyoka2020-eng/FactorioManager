@@ -14,7 +14,6 @@ OutputBaseFilename=FactorioModManagerSetup-1.0.0
 OutputDir=dist
 Compression=lzma2
 SolidCompression=yes
-SolidCompressionLevel=max
 WizardStyle=modern
 WizardSizePercent=100
 ArchitecturesInstallIn64BitMode=x64
@@ -29,10 +28,6 @@ DisableFinishedPage=no
 LicenseFile=LICENSE
 SetupIconFile=icon.ico
 UninstallDisplayIcon={app}\FactorioModManager.exe
-VersionInfoVersion=1.0.0.0
-VersionInfoCompany=Factorio Mod Manager Contributors
-VersionInfoFileDescription=Factorio Mod Manager - Desktop Application for Managing Factorio Mods
-VersionInfoProductName=Factorio Mod Manager
 UninstallDisplayName=Factorio Mod Manager
 
 [Languages]
@@ -60,13 +55,3 @@ Filename: "{app}\FactorioModManager.exe"; Description: "{cm:LaunchProgram,Factor
 
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"
-
-[Code]
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Create a shortcut to the app in the start menu
-    CreateDirectory(ExpandConstant('{userprograms}\Factorio Mod Manager'));
-  end;
-end;
