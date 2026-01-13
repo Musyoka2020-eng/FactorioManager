@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=0.5">
+    <title>Factorio mods - Free downloader</title>
+    <meta name="keywords"
+        content="factorio mods, mods, factorio, download factorio mods, factorio mods free, download free factorio mods" />
+    <meta name="description"
+        content="Free mods for Factorio game | Always up-to-date - Simply search and download all available Factorio mods" />
+    <link rel="canonical" href="https://re146.dev/factorio/mods/en" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Factorio mods - Free downloader" />
+    <meta property="og:description"
+        content="Free mods for Factorio game | Always up-to-date - Simply search and download all available Factorio mods" />
+    <meta property="og:url" content="https://re146.dev/factorio/mods/en" />
+    <meta property="og:site_name" content="re146.dev" />
+    <meta property="og:image" content="https://re146.dev/factorio/mods/favicon.png" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css"
+        integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link rel="shortcut icon" type="image/png" href="favicon.png" />
+    <script>
+        window.mirrors = {
+            'main': {
+                baseUrl: 'https://mods-storage.re146.dev/',
+                title: 'Main Cloudflare R2 storage'
+            }
+        };
+    </script>
+    <style>
+        .progress {
+            background-color: #555;
+        }
+
+        .top-margin {
+            margin-top: 20px;
+        }
+
+        .download {
+            height: 40px;
+            margin-bottom: 100px;
+        }
+
+        html {
+            position: relative;
+            min-height: 100%;
+        }
+
+        body {
+            margin-bottom: 60px;
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 60px;
+            line-height: 60px;
+            background-color: #f5f5f5;
+        }
+
+        #download-link {
+            font-size: small;
+            text-decoration: underline;
+            color: gray;
+        }
+
+        .main-block {
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container top-margin">
+        <div class="col-12">
+            <div class="row">
+                <div class="col-9">
+                    <h1>Free Factorio mods downloader</h1>
+                </div>
+                <select class="form-control col-3" id="language-select">
+                    <option value="ru">Russian</option>
+                    <option value="en" selected>English</option>
+                </select>
+            </div>
+            <hr>
+            <div class="top-margin main-block">
+                <!-- <div class="alert alert-warning">
+                    <p><b>Important information</b></p>
+                    Recently, the developers of Factorio have been tightening the possibility of the existence of this
+                    resource (they ban accounts that are used, send abuses to hoster). So any interruptions in the speed
+                    of updating mods are inevitable, so if something does not work for you, do not hesitate to write
+                    (preferably to <a href="https://t.me/radioegor146 ">Telegram</a>)
+                </div> -->
+                <div class="alert alert-warning">
+                    <p><b>New Telegram Bot</b></p>
+                    There is a new Telegram bot for downloading mods, if this website does not work: <a
+                        href="https://t.me/factorio_mods_downloader_bot">@factorio_mods_downloader_bot</a>
+                    <br>
+                    If something does not work, or you have any feedback, feel free to reach me: <a
+                        href="https://t.me/radioegor146">Telegram</a>
+                </div>
+                <div class="row">
+                    <div class="input-group col-10">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text" id="mod-link-describer">Mod portal link</span>
+                        </div>
+                        <input type="url" class="form-control is-invalid" name="mod-link" id="mod-link"
+                            aria-label="mod-link" aria-describedby="mod-link-describer"
+                            placeholder="https://mods.factorio.com/mod/<id>">
+                    </div>
+                    <div class="col-2">
+                        <button class="btn btn-success w-100" id="reload-mod-info" disabled><i
+                                class="fas fa-redo"></i></button>
+                    </div>
+                </div>
+                <br>
+                <div class="alert alert-danger" id="info-alert" style="display: none">
+                </div>
+                <div id="mod-info-interface" style="display: none">
+                    <br>
+                    <dl class="row">
+                        <dt class="col-sm-3">ID:</dt>
+                        <dd class="col-sm-9" id="mod-info-name"></dd>
+                        <dt class="col-sm-3">Title:</dt>
+                        <dd class="col-sm-9" id="mod-info-title"></dd>
+                        <dt class="col-sm-3">Owner:</dt>
+                        <dd class="col-sm-9" id="mod-info-owner"></dd>
+                        <dt class="col-sm-3">Category:</dt>
+                        <dd class="col-sm-9" id="mod-info-category"></dd>
+                        <dt class="col-sm-3">Summary:</dt>
+                        <dd class="col-sm-9" id="mod-info-summary"></dd>
+                        <dt class="col-sm-3">Last update at:</dt>
+                        <dd class="col-sm-9" id="mod-info-last-update-at"></dd>
+                        <dt class="col-sm-3">Downloads:</dt>
+                        <dd class="col-sm-9" id="mod-info-downloads"></dd>
+                    </dl>
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text" id="mod-version-describer">Version</span>
+                        </div>
+                        <select class="form-control" name="mod-version" id="mod-version" aria-label="mod-version"
+                            aria-describedby="mod-version-describer">
+                        </select>
+                    </div>
+                    <br>
+                    <dl class="row">
+                        <dt class="col-sm-3" id="mod-info-required-dependencies-header">Required dependencies:</dt>
+                        <dd class="col-sm-9" id="mod-info-required-dependencies"></dd>
+                        <dt class="col-sm-3" id="mod-info-optional-dependencies-header">Optional dependencies:</dt>
+                        <dd class="col-sm-9" id="mod-info-optional-dependencies"></dd>
+                        <dt class="col-sm-3" id="mod-info-incompatible-dependencies-header">Incompatible mods:</dt>
+                        <dd class="col-sm-9" id="mod-info-incompatible-dependencies"></dd>
+                    </dl>
+                    <a style="display: none" id="hidden-downloader"></a>
+                </div>
+                <div class="input-group" style="display: none" id="mirror-block">
+                    <div class="input-group-prepend">
+                        <span class="input-group-text" id="mod-version-describer">Mirror</span>
+                    </div>
+                    <select class="form-control" name="mirror" id="mirror" aria-label="mirror"
+                        aria-describedby="mirror-describer">
+                    </select>
+                </div>
+                <br>
+                <button class="btn btn-primary w-100 download" style="display: none"
+                    id="download-button">Download</button>
+                <div class="progress download" id="progress" style="display: none">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated h-100" id="progressbar"
+                        role="progressbar">
+                        <span class="justify-content-center d-flex position-absolute w-100" style="font-size: 1rem"
+                            id="current-operation-info">Downloading...</span>
+                    </div>
+                </div>
+                <a href="" id="download-link" target="_blank" style="display: none">In case of downloade errors try
+                    this, or change the mirror
+                    (click here, though maybe not safe on fallback mirrors)</a>
+            </div>
+        </div>
+    </div>
+    <footer class="footer">
+        <div class="container">
+            <span class="text-muted">&copy; radioegor146 2019 - 2025</span>
+            <span class="text-muted float-right"><a href="/"><b>Contacts</b></a></span>
+            <span class="text-muted float-right" style="margin-left: 10px; margin-right: 10px;"><img width="24px"
+                    src="https://www.tampermonkey.net/images/icon.png" />
+                There's now useful script for TamperMonkey: <a target="_blank"
+                    href="/factorio/mods/free-factorio-mods-downloader-en.user.js">install</a></span>
+        </div>
+    </footer>
+    <script type="text/javascript">
+        window.mirror = 'main';
+
+        function parseDependencies(dependencies) {
+            let result = {
+                base: undefined,
+                required: [],
+                optional: [],
+                incompatible: []
+            };
+
+            let regex = /^((?:)|(?:\?)|(?:\(\?\))|(?:!)|(?:~))(?:\s?)([%\w\s-]+)(?:\s{0,})(?:((?:=>)|(?:==)|(?:=)|(?:<=)|(?:>=)|(?:<)|(?:>)|(?:))(?:\s{0,})((\d+\.\d+\.\d+)|(\d+\.\d+)))?$/i;
+
+            if (typeof dependencies == 'string') {
+                dependencies = [dependencies];
+            }
+
+            for (let i = dependencies.length - 1; i >= 0; i--) {
+                let match = dependencies[i].match(regex);
+                if (match == null) {
+                    if (window.Sentry) Sentry.captureException(new Error('Failed to parse dep: ' + dependencies[i]));
+                    continue;
+                }
+                if (match[2].trim() == 'base') {
+                    result.base = match[4];
+                    continue;
+                }
+                switch (match[1]) {
+                    case '':
+                    case '=':
+                    case '==':
+                        result.required.push({
+                            id: match[2],
+                            ineq: match[3] ? (match[3] == '==' ? '=' : match[3]) : '',
+                            version: match[4] ?? ''
+                        });
+                        break;
+                    case '(?)':
+                    case '?':
+                        result.optional.push({
+                            id: match[2],
+                            ineq: match[3] ?? '',
+                            version: match[4] ?? ''
+                        });
+                        break;
+                    case '!':
+                        result.incompatible.push({
+                            id: match[2]
+                        });
+                        break;
+                }
+            }
+
+            return result;
+        }
+
+        $('#download-link').click(() => {
+            try {
+                gtag('event', 'download');
+            } catch {
+                // ignore
+            }
+        })
+
+        async function digest(buffer) {
+            const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }
+
+        function proceed(name, version) {
+            $('#current-operation-info').text('Downloading...');
+            $('#mod-link').attr('disabled', true);
+            $('#reload-mod-info').attr('disabled', true);
+            try {
+                gtag('event', 'download');
+            } catch {
+                // ignore
+            }
+            if (window.Sentry) Sentry.setContext('mod', { name, version, mirror: window.mirrors[window.mirror].baseUrl });
+            fetch(window.mirrors[window.mirror].baseUrl + name + '/' + version + '.zip', {
+                method: 'HEAD',
+                cache: 'no-cache'
+            }).then(response => {
+                if (response.status === 404) {
+                    $('#mirror').attr('disabled', false);
+                    $('#download-button').show();
+                    $('#progress').hide();
+                    $('#info-alert').html('<b>Error!</b> Mod is not found in storage! Please wait if this mod version was deployed recently or contact developers of this page! Also that can be caused because of mod update. Please wait 5-10 minutes, press Ctrl+F5 and try to redownload the mod.');
+                    $('#info-alert').show();
+                    $('#mod-link').attr('disabled', false);
+                    $('#reload-mod-info').attr('disabled', false);
+                    return;
+                }
+                let button = $('#hidden-downloader')[0];
+                button.href = window.mirrors[window.mirror].baseUrl + name + '/' + version + '.zip?anticache=' + Math.random();
+                button.click();
+                $('#mirror').attr('disabled', false);
+                $('#download-button').show();
+                $('#progress').hide();
+                $('#mod-link').attr('disabled', false);
+                $('#reload-mod-info').attr('disabled', false);
+            }).catch(e => {
+                $('#mirror').attr('disabled', false);
+                $('#download-button').show();
+                $('#progress').hide();
+                $('#info-alert').html("<b>Error!</b> Error while downloading mod: " + e.toString());
+                if (window.Sentry) Sentry.captureException(e);
+                $('#info-alert').show();
+                $('#mod-link').attr('disabled', false);
+                $('#reload-mod-info').attr('disabled', false);
+            });
+        }
+
+        $('#download-button').click(function () {
+            let mod = window.lastModName;
+            let version = $('#mod-version').val();
+            if (window.Sentry) Sentry.setTag('version', version);
+
+            $('#mirror').attr('disabled', true);
+            $('#download-button').hide();
+            $('#download-link').attr('href', window.mirrors[window.mirror].baseUrl + mod + '/' + version + '.zip?anticache=' + Math.random());
+            $('#download-link').show();
+            $('#progress').hide();
+            $('#progressbar').css('width', '0%');
+            $('#progress').show();
+            proceed(mod, version);
+        });
+
+        window.previousLinkValue = null;
+        window.lastModName = "";
+        window.lastModData = null;
+
+        $('#reload-mod-info').click(function () {
+            window.previousLinkValue = null;
+            $('#mod-link').trigger('change');
+        });
+
+        $('#mod-link').on('change keyup paste', function () {
+            if ($(this).val() === window.previousLinkValue)
+                return;
+            window.previousLinkValue = $(this).val();
+            let name = null;
+
+            let match = $(this).val().match(/https?:\/\/mods\.factorio\.com\/mod\/([^\s\/#\?]{1,})/i);
+            if (match == null) {
+                match = $(this).val().match(/https?:\/\/mods\.factorio\.com\/mods\/([^\s\/]{1,})\/([^\s\/#\?]{1,})/i);
+                if (match != null) {
+                    name = match[2];
+                }
+            } else
+                name = match[1];
+
+            $(this).removeClass('is-invalid');
+            $(this).removeClass('is-valid');
+            $(this).addClass(name != null ? 'is-valid' : 'is-invalid');
+            $('#info-alert').hide();
+            $('#mirror-block').hide();
+            $('#download-button').hide();
+            $('#download-link').hide();
+            $('#download-button').attr('disabled', false);
+            $('#mod-info-interface').hide();
+            $('#progress').hide();
+            $('#reload-mod-info').attr('disabled', true);
+            if (name != null) {
+                location.hash = '#' + match[0];
+                window.lastModName = name;
+                if (window.Sentry) Sentry.setTag('name', name);
+                $('#progressbar').css('width', '100%');
+                $('#current-operation-info').text('Fetching mod information...');
+                $('#progress').show();
+                const fetchedModName = name;
+                fetch('/factorio/mods/modinfo?rand=' + Math.random().toString().replace('.', '') + '&id=' + name, {
+                    cache: 'no-cache',
+                    method: 'GET'
+                }).then(async response => {
+                    if (response.status === 404) {
+                        if (window.lastModName != fetchedModName)
+                            return;
+                        $('#info-alert').html('<b>Error!</b> Mod not found on mods.factorio.com!');
+                        $('#info-alert').show();
+                        $('#progress').hide();
+                        return;
+                    }
+
+                    const data = await response.json();
+
+                    if (window.lastModName != fetchedModName)
+                        return;
+                    try {
+                        gtag('event', 'search');
+                    } catch {
+                        // ignore
+                    }
+                    window.lastModData = data;
+                    $('#reload-mod-info').attr('disabled', false);
+                    $('#progress').hide();
+                    $('#mod-info-name').text(data.name);
+                    $('#mod-info-title').text(data.title);
+                    $('#mod-info-owner').text(data.owner);
+                    $('#mod-info-category').text(data.category);
+                    $('#mod-info-downloads').text(data.downloads_count);
+                    $('#mod-info-summary').text(data.summary);
+                    $('#mod-info-last-update-at').text(new Date(data.updated_at).toLocaleString());
+                    $('#mod-version').empty();
+                    for (let i = data.releases.length - 1; i >= 0; i--) {
+                        if (window.Sentry) Sentry.setTag('version', data.releases[i].version);
+                        let dependencies = parseDependencies(data.releases[i].info_json.dependencies);
+                        let factorioVersion = data.releases[i].info_json == undefined ? null :
+                            ((dependencies.base == undefined ? '' : (dependencies.base + '/')) + data.releases[i].info_json.factorio_version)
+                        $('#mod-version').append($('<option>').attr('value', data.releases[i].version).text(data.releases[i].version + ((i == data.releases.length - 1) ? ' (last)' : '') + (factorioVersion == undefined ? '' : ' for ' + factorioVersion)));
+                    }
+                    const version = window.preloadedVersion;
+                    if (version) {
+                        window.preloadedVersion = undefined;
+                        for (let i = data.releases.length - 1; i >= 0; i--) {
+                            if (version == data.releases[i].version) {
+                                $('#mod-version').val(version);
+                                break;
+                            }
+                        }
+                    }
+                    $('#mod-version').trigger('change');
+                    if (data.releases.length == 0) {
+                        $('#download-button').attr('disabled', true);
+                    }
+                    $('#mirror-block').show();
+                    $('#download-button').show();
+                    $('#mod-info-interface').show();
+                }).catch(e => {
+                    if (window.lastModName != fetchedModName)
+                        return;
+                    $('#info-alert').html("<b>Error!</b> Error while fetching data from mod portal: " + e.toString());
+                    if (window.Sentry) Sentry.captureException(e);
+                    $('#info-alert').show();
+                    $('#progress').hide();
+                });
+            }
+        });
+        $('#mod-version').change(function () {
+            $('#download-link').hide();
+            let data = window.lastModData;
+            if (data == undefined)
+                return;
+            if (data.releases == undefined)
+                return;
+            if (data.releases.length == 0)
+                return;
+            if (window.Sentry) Sentry.setTag('version', $(this).val());
+            let i = data.releases.length - $(this).prop('selectedIndex') - 1;
+            if (data.releases[i].info_json != undefined && data.releases[i].info_json.dependencies != undefined) {
+                let deps = parseDependencies(data.releases[i].info_json.dependencies);
+                if (deps.required.length > 0) {
+                    let dependenciesList = $('<ul>');
+                    for (let j = 0; j < deps.required.length; j++) {
+                        dependenciesList.append($('<li>').html($('<a>').attr('href', location.origin + location.pathname + location.search + '#https://mods.factorio.com/mod/' + deps.required[j].id).attr('target', '_blank').text(deps.required[j].id + ' ' + deps.required[j].ineq + ' ' + deps.required[j].version)));
+                    }
+                    $('#mod-info-required-dependencies').html(dependenciesList);
+                    $('#mod-info-required-dependencies').show();
+                    $('#mod-info-required-dependencies-header').show();
+                } else {
+                    $('#mod-info-required-dependencies').hide();
+                    $('#mod-info-required-dependencies-header').hide();
+                }
+                if (deps.optional.length > 0) {
+                    let dependenciesList = $('<ul>');
+                    for (let j = 0; j < deps.optional.length; j++) {
+                        dependenciesList.append($('<li>').html($('<a>').attr('href', location.origin + location.pathname + location.search + '#https://mods.factorio.com/mod/' + deps.optional[j].id).attr('target', '_blank').text(deps.optional[j].id + ' ' + deps.optional[j].ineq + ' ' + deps.optional[j].version)));
+                    }
+                    $('#mod-info-optional-dependencies').html(dependenciesList);
+                    $('#mod-info-optional-dependencies').show();
+                    $('#mod-info-optional-dependencies-header').show();
+                } else {
+                    $('#mod-info-optional-dependencies').hide();
+                    $('#mod-info-optional-dependencies-header').hide();
+                }
+                if (deps.incompatible.length > 0) {
+                    let dependenciesList = $('<ul>');
+                    for (let j = 0; j < deps.incompatible.length; j++) {
+                        dependenciesList.append($('<li>').html($('<a>').attr('href', location.origin + location.pathname + location.search + '#https://mods.factorio.com/mod/' + deps.incompatible[j].id).attr('target', '_blank').text(deps.incompatible[j].id).addClass('text-danger')));
+                    }
+                    $('#mod-info-incompatible-dependencies').html(dependenciesList);
+                    $('#mod-info-incompatible-dependencies').show();
+                    $('#mod-info-incompatible-dependencies-header').show();
+                } else {
+                    $('#mod-info-incompatible-dependencies').hide();
+                    $('#mod-info-incompatible-dependencies-header').hide();
+                }
+            }
+        });
+        $('#language-select').change(function () {
+            window.location.href = "/factorio/mods/" + $(this).val() + location.hash;
+        });
+        $('#mirror').change(function () {
+            window.mirror = $(this).val();
+            try {
+                window.localStorage.setItem('mirror_id', $(this).val());
+            } catch (e) {
+                // ignore
+            }
+        });
+        $(document).ready(function () {
+            (() => {
+                try {
+                    window.mirror = window.localStorage.getItem('mirror_id') ?? 'main';
+                    if (!window.mirrors[window.mirror]) {
+                        window.mirror = 'main';
+                    }
+                    window.localStorage.setItem('mirror_id', window.mirror);
+                } catch (e) {
+                    // ignore
+                }
+                for (const id of Object.keys(window.mirrors)) {
+                    const mirror = window.mirrors[id];
+                    $('#mirror').append($('<option>').html(`${mirror.title}${mirror.fallback ? ' (fallback)' : ''}`).attr('value', id));
+                }
+                $('#mirror').val(window.mirror);
+            })();
+            let preloadedUrl = location.hash.length > 0 ? location.hash.substring(1) : '';
+            let parts = preloadedUrl.split('#');
+            $('#mod-link').val(parts[0]);
+            if (parts.length == 2) {
+                window.preloadedVersion = parts[1];
+            }
+            $('#mod-link').trigger('change');
+        });
+    </script>
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-177136745-1"></script>
+    <script>
+        try {
+            window.dataLayer = window.dataLayer || [];
+            function gtag() { dataLayer.push(arguments); }
+            gtag('js', new Date());
+
+            gtag('config', 'UA-177136745-1');
+            gtag('config', 'G-1J58B5XP81');
+        } catch (e) {
+            // ignore
+        }
+    </script>
+    <script src="https://browser.sentry-cdn.com/6.19.3/bundle.min.js"
+        integrity="sha384-nPdevhdd3kzoE6qSkQOcxINaeJgCo/0OZ+Q8WV3rnT3Z95tbfSmkVRlYbDV6iKpl"
+        crossorigin="anonymous"></script>
+    <script>
+        if (window.Sentry) Sentry.init({
+            dsn: "https://cdd2ccfbcee242409eb16534d627ddf4@o1180919.ingest.sentry.io/6307427",
+            tracesSampleRate: 1.0,
+        });
+    </script>
+</body>
+
+</html>
