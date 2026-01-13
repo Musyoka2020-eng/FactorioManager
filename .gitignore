@@ -1,0 +1,22 @@
+.gitignore
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.venv/
+venv/
+*.log
+.env
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build and installer files (generated, not needed in repo)
+*.spec
+*.iss
+.pyinstaller/
