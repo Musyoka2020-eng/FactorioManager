@@ -1,8 +1,10 @@
 """Helper utilities for Factorio Mod Manager."""
 import json
 import zipfile
+import socket
 from pathlib import Path
 from typing import Dict, Optional, Any
+import requests # type: ignore
 
 
 def parse_mod_info(mod_zip_path: Path) -> Optional[Dict[str, Any]]:
@@ -77,3 +79,50 @@ def validate_mod_url(url: str) -> bool:
         True if valid, False otherwise
     """
     return url.startswith("https://mods.factorio.com/mod/")
+
+
+def is_online() -> tuple[bool, Optional[str]]:
+    """
+    Check if device has internet connectivity.
+    
+    Args:
+        None
+        
+    Returns:
+        Tuple of (is_online: bool, error_message: str or None)
+    """
+    try:
+        # Try to resolve DNS
+        socket.gethostbyname("mods.factorio.com")
+        return True, None
+    except socket.gaierror:
+        return False, "DNS resolution failed - unable to reach mods.factorio.com"
+    except socket.error as e:
+        return False, f"Network error: {str(e)}"
+    except Exception as e:
+        return False, f"Connection check failed: {str(e)}"
+
+
+def check_factorio_portal_status() -> tuple[bool, str]:
+    """
+    Check if Factorio portal is accessible and responding.
+    
+    Args:
+        None
+        
+    Returns:
+        Tuple of (is_accessible: bool, status_message: str)
+    """
+    try:
+        response = requests.head("https://mods.factorio.com", timeout=5)
+        if response.status_code == 200:
+            return True, "Portal is online"
+        else:
+            return False, f"Portal returned status {response.status_code}"
+    except requests.exceptions.ConnectionError:
+        return False, "Cannot connect to Factorio portal - network error"
+    except requests.exceptions.Timeout:
+        return False, "Connection to Factorio portal timed out"
+    except Exception as e:
+        return False, f"Portal check failed: {str(e)}"
+

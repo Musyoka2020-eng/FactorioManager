@@ -8,6 +8,7 @@ from .status_manager import StatusManager
 from .downloader_tab import DownloaderTab
 from .checker_tab import CheckerTab
 from .logger_tab import LoggerTab
+from .widgets import NotificationManager
 from ..utils import config
 
 
@@ -33,9 +34,11 @@ class MainWindow:
             log_queue: Queue for receiving log messages
         """
         self.root = root
-        self.root.title("🏭 Factorio Mod Manager v1.0.0")
+        self.root.title("🏭 Factorio Mod Manager v1.1.0")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
+        # Start application maximized
+        self.root.state('zoomed')
         self.log_queue = log_queue
         self.logger = logging.getLogger("factorio_mod_manager")
         
@@ -43,6 +46,9 @@ class MainWindow:
         
         # Configure styles
         self._setup_styles()
+        
+        # Create notification manager (will overlay on top of content)
+        self.notification_manager = NotificationManager(self.root)
         
         # Create header
         self._create_header()
@@ -67,6 +73,10 @@ class MainWindow:
         # Create tabs and pass status manager reference
         self.downloader_tab = DownloaderTab(self.notebook, status_manager=self.status_manager)
         self.checker_tab = CheckerTab(self.notebook, logger=self.logger, status_manager=self.status_manager)
+        
+        # Pass notification manager to tabs
+        self.downloader_tab.set_notification_manager(self.notification_manager)
+        self.checker_tab.set_notification_manager(self.notification_manager)
         
         self.notebook.add(self.downloader_tab.frame, text="⬇️  Downloader")
         self.notebook.add(self.checker_tab.frame, text="✓  Checker & Updates")
@@ -118,9 +128,9 @@ class MainWindow:
         style.configure("Card.TFrame", background=self.DARK_BG, relief="flat", borderwidth=1)
         
         # Configure label styles
-        style.configure("TLabel", background=self.BG_COLOR, foreground=self.FG_COLOR)
-        style.configure("Header.TLabel", background=self.BG_COLOR, foreground=self.FG_COLOR, font=("Segoe UI", 10, "bold"))
-        style.configure("Small.TLabel", background=self.BG_COLOR, foreground=self.SECONDARY_FG, font=("Segoe UI", 8))
+        style.configure("TLabel", background=self.BG_COLOR, foreground=self.FG_COLOR, font=("Segoe UI", 10))
+        style.configure("Header.TLabel", background=self.BG_COLOR, foreground=self.FG_COLOR, font=("Segoe UI", 11, "bold"))
+        style.configure("Small.TLabel", background=self.BG_COLOR, foreground=self.SECONDARY_FG, font=("Segoe UI", 9))
         
         # Configure button styles
         style.configure(
@@ -202,29 +212,34 @@ class MainWindow:
     
     def _create_status_bar(self) -> None:
         """Create status bar at bottom."""
-        status_frame = tk.Frame(self.root, bg=self.DARK_BG, height=30)
-        status_frame.pack(side="bottom", fill="x", padx=0, pady=0)
+        # Top separator line
+        separator = tk.Frame(self.root, bg="#0078d4", height=2)
+        separator.pack(side="bottom", fill="x", padx=0, pady=0)
+        
+        # Status bar frame with better styling
+        status_frame = tk.Frame(self.root, bg="#1a2a3a", height=40)
+        status_frame.pack(side="bottom", fill="x", padx=0, pady=(5, 0))
         status_frame.pack_propagate(False)
         
         # Status icon and text
-        status_inner = tk.Frame(status_frame, bg=self.DARK_BG)
-        status_inner.pack(side="left", fill="both", expand=True, padx=10, pady=5)
+        status_inner = tk.Frame(status_frame, bg="#1a2a3a")
+        status_inner.pack(side="left", fill="both", expand=True, padx=12, pady=8)
         
         self.status_icon = tk.Label(
             status_inner,
-            text="⚪",
-            bg=self.DARK_BG,
+            text="●",
+            bg="#1a2a3a",
             fg=self.SUCCESS_COLOR,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 12, "bold")
         )
-        self.status_icon.pack(side="left", padx=(0, 5))
+        self.status_icon.pack(side="left", padx=(0, 8))
         
         self.status_label = tk.Label(
             status_inner,
             text="Ready",
-            bg=self.DARK_BG,
+            bg="#1a2a3a",
             fg=self.FG_COLOR,
-            font=("Segoe UI", 9)
+            font=("Segoe UI", 10)
         )
         self.status_label.pack(side="left", fill="both", expand=True)
     

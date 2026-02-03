@@ -6,6 +6,8 @@ from .helpers import (
     extract_version_from_filename,
     format_file_size,
     validate_mod_url,
+    is_online,
+    check_factorio_portal_status,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "extract_version_from_filename",
     "format_file_size",
     "validate_mod_url",
+    "is_online",
+    "check_factorio_portal_status",
 ]

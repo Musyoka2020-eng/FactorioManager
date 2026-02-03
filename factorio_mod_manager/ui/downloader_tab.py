@@ -5,9 +5,9 @@ from typing import Optional, Dict, Any
 from threading import Thread
 import time
 from ..core import ModDownloader
-from ..core.portal import FactorioPortalAPI
-from ..utils import config, validate_mod_url, format_file_size
-from .widgets import PlaceholderEntry
+from ..core.portal import FactorioPortalAPI, PortalAPIError
+from ..utils import config, validate_mod_url, format_file_size, is_online
+from .widgets import PlaceholderEntry, NotificationManager
 
 
 class DownloaderTab:
@@ -33,14 +33,39 @@ class DownloaderTab:
         self.frame = ttk.Frame(parent, style="Dark.TFrame")
         self.parent = parent
         self.status_manager = status_manager  # Reference to status manager
+        self.notification_manager: Optional[NotificationManager] = None
         self.downloader: Optional[ModDownloader] = None
         self.portal = FactorioPortalAPI()
         self.is_downloading = False
         self.last_search_time = 0
         self.search_timer = None
-        self.mod_progress_widgets = {}  # Store individual mod progress widgets
         
+        # Setup UI
         self._setup_ui()
+    
+    def _get_notification_manager(self) -> NotificationManager:
+        """Get or create notification manager."""
+        if self.notification_manager is None:
+            root = self.frame.winfo_toplevel()
+            self.notification_manager = NotificationManager(root)
+        return self.notification_manager
+    
+    def set_notification_manager(self, manager: NotificationManager) -> None:
+        """Set the notification manager (called by main window)."""
+        self.notification_manager = manager
+    
+    def _notify(self, message: str, notification_type: str = "info", duration_ms: int = 4000, actions: Optional[list] = None) -> None:
+        """
+        Show a notification.
+        
+        Args:
+            message: Notification message
+            notification_type: Type - "success", "error", "warning", or "info"
+            duration_ms: Duration to show (0 = persistent)
+            actions: List of tuples (label, callback) for action buttons
+        """
+        manager = self._get_notification_manager()
+        manager.show(message, notification_type=notification_type, duration_ms=duration_ms, actions=actions)
     
     def _setup_ui(self) -> None:
         """Setup the UI components."""
@@ -62,6 +87,9 @@ class DownloaderTab:
         
         self._main_scrollbar = main_scroll
         self._scrollbar_visible = False
+        
+        # Store individual mod progress widgets
+        self.mod_progress_widgets = {}
         
         def on_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -111,14 +139,22 @@ class DownloaderTab:
         
         # Header
         header_font = font.Font(family="Segoe UI", size=11, weight="bold")
+        
+        # Header with separator line
+        header_sep_frame = tk.Frame(input_frame, bg=self.DARK_BG)
+        header_sep_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
+        
         header = tk.Label(
-            input_frame,
-            text="📥 Download Mod",
+            header_sep_frame,
+            text="Download Mod",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        header.pack(anchor="w", padx=15, pady=(10, 5))
+        header.pack(anchor="w")
+        
+        separator = tk.Frame(header_sep_frame, bg=self.ACCENT_COLOR, height=2)
+        separator.pack(anchor="w", fill="x", pady=(5, 0))
         
         # Mod URL with icon
         url_label_frame = tk.Frame(input_frame, bg=self.DARK_BG)
@@ -132,9 +168,12 @@ class DownloaderTab:
             font=("Segoe UI", 10)
         )
         url_label.pack(anchor="w")
+        # URL input frame with button
+        url_input_frame = tk.Frame(input_frame, bg=self.DARK_BG)
+        url_input_frame.pack(fill="x", padx=15, pady=(5, 10))
         
         self.url_entry = PlaceholderEntry(
-            input_frame,
+            url_input_frame,
             placeholder="https://mods.factorio.com/mod/",
             placeholder_color="#666666",
             bg=self.DARK_BG,
@@ -144,41 +183,60 @@ class DownloaderTab:
             relief="solid",
             font=("Segoe UI", 10)
         )
-        self.url_entry.pack(fill="x", padx=15, pady=(5, 10))
+        self.url_entry.pack(side="left", fill="both", expand=True, padx=(0, 8))
         
-        # Bind URL changes to trigger search
+        self.get_details_btn = tk.Button(
+            url_input_frame,
+            text="Load Mod",
+            command=self._load_dependencies,
+            bg=self.ACCENT_COLOR,
+            fg="#ffffff",
+            activebackground="#1084d7",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            font=("Segoe UI", 9, "bold")
+        )
+        self.get_details_btn.pack(side="right", padx=0)
+        
+        # Bind URL changes to trigger auto-search (light search only)
         self.url_entry.bind("<KeyRelease>", lambda e: self._schedule_search())
         
         # Mods folder
         folder_label_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        folder_label_frame.pack(anchor="w", padx=15, pady=(5, 0))
+        folder_label_frame.pack(anchor="w", padx=15, pady=(8, 0))
         
         folder_label = tk.Label(
             folder_label_frame,
-            text="📁 Mods Folder:",
+            text="Mods Folder:",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 10, "bold")
         )
         folder_label.pack(anchor="w")
         
-        folder_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        folder_frame.pack(fill="x", padx=15, pady=(5, 0))
+        # Folder display frame with better styling
+        folder_display_frame = tk.Frame(input_frame, bg=self.DARK_BG)
+        folder_display_frame.pack(fill="x", padx=15, pady=(6, 12))
+        
+        folder_text_frame = tk.Frame(folder_display_frame, bg="#2a2a2a", relief="sunken", bd=2)
+        folder_text_frame.pack(side="left", fill="both", expand=True, padx=(0, 8))
         
         self.folder_var = tk.StringVar(value=config.get("mods_folder", ""))
-        self.folder_label = tk.Label(
-            folder_frame,
+        self.folder_display = tk.Label(
+            folder_text_frame,
             textvariable=self.folder_var,
-            bg=self.BG_COLOR,
-            fg=self.SECONDARY_FG,
-            font=("Segoe UI", 9),
+            bg="#2a2a2a",
+            fg="#c0c0c0",
+            font=("Courier New", 10),
             wraplength=400,
-            justify="left"
+            justify="left",
+            anchor="w"
         )
-        self.folder_label.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+        self.folder_display.pack(fill="both", expand=True, padx=10, pady=8)
         
         browse_btn = tk.Button(
-            folder_frame,
+            folder_display_frame,
             text="Browse",
             command=self._browse_folder,
             bg=self.ACCENT_COLOR,
@@ -195,18 +253,25 @@ class DownloaderTab:
         info_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
         info_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
+        # Info header with separator
+        info_header_frame = tk.Frame(info_frame, bg=self.DARK_BG)
+        info_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
+        
         info_header = tk.Label(
-            info_frame,
-            text="ℹ️  Mod Information",
+            info_header_frame,
+            text="Mod Information",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        info_header.pack(anchor="w", padx=15, pady=(10, 5))
+        info_header.pack(anchor="w")
+        
+        info_separator = tk.Frame(info_header_frame, bg=self.ACCENT_COLOR, height=2)
+        info_separator.pack(anchor="w", fill="x", pady=(5, 0))
         
         # Info display area with optional scrollbar
         info_scroll_frame = tk.Frame(info_frame, bg=self.DARK_BG)
-        info_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+        info_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(10, 10))
         
         self.info_scrollbar = tk.Scrollbar(info_scroll_frame)
         # Start with scrollbar hidden
@@ -244,14 +309,21 @@ class DownloaderTab:
         options_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
         options_frame.pack(fill="x", padx=10, pady=(0, 10))
         
+        # Options header with separator
+        options_header_frame = tk.Frame(options_frame, bg=self.DARK_BG)
+        options_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
+        
         options_header = tk.Label(
-            options_frame,
-            text="⚙️  Options",
+            options_header_frame,
+            text="Options",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        options_header.pack(anchor="w", padx=15, pady=(10, 5))
+        options_header.pack(anchor="w")
+        
+        options_separator = tk.Frame(options_header_frame, bg=self.ACCENT_COLOR, height=2)
+        options_separator.pack(anchor="w", fill="x", pady=(5, 0))
         
         self.include_optional_var = tk.BooleanVar(
             value=config.get("download_optional", False)
@@ -259,7 +331,7 @@ class DownloaderTab:
         
         checkbox = tk.Checkbutton(
             options_frame,
-            text="Include optional dependencies (⚠️  may increase download size)",
+            text="Include optional dependencies (⚠️ may increase download size)",
             variable=self.include_optional_var,
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
@@ -276,7 +348,7 @@ class DownloaderTab:
         
         self.download_btn = tk.Button(
             button_frame,
-            text="⬇️  Download",
+            text="Download",
             command=self._start_download,
             bg=self.SUCCESS_COLOR,
             fg="#000000",
@@ -294,18 +366,25 @@ class DownloaderTab:
         progress_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
         progress_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
+        # Progress header with separator
+        progress_header_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
+        progress_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
+        
         progress_header = tk.Label(
-            progress_frame,
-            text="📊 Download Progress",
+            progress_header_frame,
+            text="Download Progress",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        progress_header.pack(anchor="w", padx=15, pady=(10, 5))
+        progress_header.pack(anchor="w")
+        
+        progress_separator = tk.Frame(progress_header_frame, bg=self.ACCENT_COLOR, height=2)
+        progress_separator.pack(anchor="w", fill="x", pady=(5, 0))
         
         # Main progress bar
         progress_info_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
-        progress_info_frame.pack(fill="x", padx=15, pady=(0, 0))
+        progress_info_frame.pack(fill="x", padx=15, pady=(10, 0))
         
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(
@@ -594,7 +673,7 @@ class DownloaderTab:
         
         # Validate input
         if not url or url == "https://mods.factorio.com/mod/":
-            messagebox.showerror("Error", "Please enter a mod URL or mod name")
+            self._notify("Please enter a mod URL or mod name", notification_type="error")
             return
         
         # If URL doesn't contain full path, treat it as mod name and auto-complete
@@ -604,9 +683,9 @@ class DownloaderTab:
         else:
             # Validate full URL format
             if not validate_mod_url(url):
-                messagebox.showerror(
-                    "Error",
-                    "Invalid URL. Please use: https://mods.factorio.com/mod/ModName"
+                self._notify(
+                    "Invalid URL. Please use: https://mods.factorio.com/mod/ModName",
+                    notification_type="error"
                 )
                 return
             # Extract mod name from URL (remove query parameters)
@@ -614,7 +693,7 @@ class DownloaderTab:
             mod_name = mod_name.split("?")[0]  # Remove query parameters like ?from=search
         
         if not mods_folder:
-            messagebox.showerror("Error", "Please select a mods folder")
+            self._notify("Please select a mods folder", notification_type="error")
             return
         
         # Disable button and start download
@@ -630,6 +709,13 @@ class DownloaderTab:
         for widget in self.mods_frame.winfo_children():
             widget.destroy()
         self._log_progress(f"Starting download for {mod_name}...\n", "info")
+        
+        # Check network connectivity
+        is_online_status, _ = is_online()
+        if not is_online_status:
+            self._log_progress("Network error: You are offline\n", "error")
+            self.frame.after(500, lambda: self._notify("📡 You are offline. Cannot download mods without internet connection.", notification_type="error"))
+            return
         
         # Start download in background thread
         thread = Thread(
@@ -671,24 +757,31 @@ class DownloaderTab:
             
             # Show results
             if downloaded:
-                msg = f"\n✓ Successfully downloaded {len(downloaded)} mod(s)"
-                self._log_progress(msg, "success")
+                msg = f"✓ Successfully downloaded {len(downloaded)} mod(s)"
+                self._log_progress(f"\n{msg}\n", "success")
                 if self.status_manager:
                     self.status_manager.push_status(f"Downloaded {len(downloaded)} mod(s) successfully", "success")
-                messagebox.showinfo("Download Complete", msg.strip())
+                self.frame.after(500, lambda: self._notify(msg, notification_type="success", duration_ms=5000))
             
             if failed:
-                msg = f"\n✗ Failed to download: {', '.join(failed)}"
-                self._log_progress(msg, "error")
+                msg = f"✗ Failed to download: {', '.join(failed)}"
+                self._log_progress(f"\n{msg}\n", "error")
                 if self.status_manager:
                     self.status_manager.push_status(f"Failed to download {len(failed)} mod(s)", "error")
+                self.frame.after(500, lambda: self._notify(msg, notification_type="error", duration_ms=6000))
         
-        except Exception as e:
-            msg = f"\n✗ Error: {e}"
-            self._log_progress(msg, "error")
+        except PortalAPIError as e:
+            error_msg = str(e.message)
+            self._log_progress(f"\n✗ {error_msg}\n", "error")
             if self.status_manager:
-                self.status_manager.push_status(f"Download error: {e}", "error")
-            messagebox.showerror("Error", f"Download failed: {e}")
+                self.status_manager.push_status(f"Download error: {error_msg}", "error")
+            self.frame.after(500, lambda: self._notify(error_msg, notification_type="error", duration_ms=6000))
+        except Exception as e:
+            error_msg = str(e)
+            self._log_progress(f"\n✗ Error: {error_msg}\n", "error")
+            if self.status_manager:
+                self.status_manager.push_status(f"Download error: {error_msg}", "error")
+            self.frame.after(500, lambda: self._notify(f"Download failed: {error_msg}", notification_type="error", duration_ms=6000))
         
         finally:
             self.is_downloading = False
@@ -729,10 +822,54 @@ class DownloaderTab:
     def _search_thread(self, mod_name: str) -> None:
         """Background thread for searching mod info."""
         try:
+            # Fetch mod info from portal - light operation, just basic mod data
+            mod_data = self.portal.get_mod(mod_name)
+            
+            # Note: We DO NOT resolve dependencies during auto-search as it's too slow
+            # and blocks the UI. Dependencies will be resolved on-demand if user downloads.
+            # This keeps the auto-search responsive while typing.
+            
+            self._display_mod_info(mod_data, mod_name)
+        except Exception as e:
+            self._display_mod_info(None, f"Error searching for mod: {e}")
+    
+    def _load_dependencies(self) -> None:
+        """Load and display mod dependencies when user clicks 'Load Dependencies' button."""
+        url = self.url_entry.get().strip()
+        
+        # Extract mod name from URL
+        if not url or url == "https://mods.factorio.com/mod/":
+            self._notify("Please enter a mod URL to see details", notification_type="warning")
+            return
+        
+        # Try to extract mod name
+        if "/mod/" in url:
+            mod_name = url.split("/mod/")[-1].strip("/")
+            mod_name = mod_name.split("?")[0]
+        else:
+            mod_name = url.split("?")[0]
+        
+        if not mod_name:
+            self._notify("Invalid mod URL format", notification_type="error")
+            return
+        
+        # Show loading status
+        self.mod_info_text.config(state="normal")
+        self.mod_info_text.delete("1.0", "end")
+        self.mod_info_text.insert("end", "Loading dependencies...", "value")
+        self.mod_info_text.config(state="disabled")
+        
+        # Start dependency resolution in background thread
+        thread = Thread(target=self._load_dependencies_thread, args=(mod_name,), daemon=True)
+        thread.start()
+    
+    def _load_dependencies_thread(self, mod_name: str) -> None:
+        """Background thread for loading and resolving mod dependencies."""
+        try:
             # Fetch mod info from portal
             mod_data = self.portal.get_mod(mod_name)
             
-            # Also resolve ALL dependencies (including optional) to show what COULD be downloaded
+            # Resolve ALL dependencies (including optional) to show what COULD be downloaded
             if mod_data:
                 from ..core.downloader import ModDownloader
                 from pathlib import Path
@@ -770,7 +907,7 @@ class DownloaderTab:
             
             self._display_mod_info(mod_data, mod_name)
         except Exception as e:
-            self._display_mod_info(None, f"Error searching for mod: {e}")
+            self._display_mod_info(None, f"Error fetching details: {e}")
     
     def _display_mod_info(self, mod_data: Optional[Dict[str, Any]], mod_name: str) -> None:
         """Display mod information in the info text widget."""

@@ -25,14 +25,16 @@ class QueueHandler(logging.Handler):
 def setup_logger(
     name: str,
     level: int = logging.INFO,
-    log_queue: Optional[Queue] = None
+    log_queue: Optional[Queue] = None,
+    log_file: Optional[Path] = None
 ) -> logging.Logger:
-    """Set up a logger with console and optional UI handlers.
+    """Set up a logger with console, file, and optional UI handlers.
     
     Args:
         name: Logger name
         level: Logging level
         log_queue: Optional queue for UI logging
+        log_file: Optional file path for file logging
         
     Returns:
         Configured logger instance
@@ -54,6 +56,17 @@ def setup_logger(
     # Add handler if not already present
     if not logger.handlers:
         logger.addHandler(console_handler)
+    
+    # File handler (if log_file provided)
+    if log_file:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            file_handler.setLevel(level)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        except Exception as e:
+            print(f"Warning: Could not set up file logging to {log_file}: {e}")
     
     # UI handler (if queue provided)
     if log_queue:

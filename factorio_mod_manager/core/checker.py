@@ -5,9 +5,9 @@ from typing import Callable, Dict, List, Optional
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .mod import Mod, ModStatus
-from .portal import FactorioPortalAPI
+from .portal import FactorioPortalAPI, PortalAPIError
 from .downloader import ModDownloader
-from ..utils import parse_mod_info
+from ..utils import parse_mod_info, format_file_size
 
 
 class ModChecker:
@@ -132,6 +132,21 @@ class ModChecker:
                     self.mods[mod_name] = mod
                     self._log_progress(f"  ✓ {mod} (Downloads: {mod.downloads:,})")
                 
+                except PortalAPIError as e:
+                    # Handle specific API errors with user-friendly messages
+                    if e.error_type == "not_found":
+                        self._log_progress(f"  ⚠ {mod_name}: Mod not found on portal (may have been removed)")
+                    elif e.error_type == "offline":
+                        self._log_progress(f"  ✗ {mod_name}: Network error - you appear to be offline")
+                    elif e.error_type == "server_error":
+                        self._log_progress(f"  ✗ {mod_name}: Portal server error - please try again later")
+                    elif e.error_type == "timeout":
+                        self._log_progress(f"  ✗ {mod_name}: Connection timeout - portal is slow or unreachable")
+                    else:
+                        self._log_progress(f"  ✗ {mod_name}: {e.message}")
+                    
+                    mod.status = ModStatus.UNKNOWN
+                    self.mods[mod_name] = mod
                 except Exception as e:
                     self._log_progress(f"  ✗ Error fetching {mod_name}: {e}")
                     mod.status = ModStatus.UNKNOWN
@@ -386,7 +401,7 @@ class ModChecker:
 
     def backup_mod(self, mod_name: str, backup_folder: str) -> bool:
         """
-        Backup a mod to a specified folder.
+        Backup a mod to a specified folder using copy (not move).
         
         Args:
             mod_name: Name of the mod to backup
@@ -414,7 +429,10 @@ class ModChecker:
                 self._log_progress(f"✗ Source mod file not found: {mod_file}")
                 return False
             
-            # Copy mod to backup folder (not move - we want to keep the original)
+            # Get original file size for verification
+            original_size = mod_file.stat().st_size
+            
+            # Copy mod to backup folder (COPY, not move - we want to keep the original)
             backup_file = backup_path / mod_file.name
             shutil.copy2(str(mod_file), str(backup_file))
             
@@ -423,12 +441,19 @@ class ModChecker:
                 self._log_progress(f"✗ Backup file was not created: {backup_file}")
                 return False
             
-            # Verify original file still exists
-            if not mod_file.exists():
-                self._log_progress(f"✗ Original mod file was removed during backup: {mod_file}")
+            # Verify backup file size matches original (ensures complete copy)
+            backup_size = backup_file.stat().st_size
+            if backup_size != original_size:
+                self._log_progress(f"✗ Backup file size mismatch: {backup_size} bytes vs {original_size} bytes (original)")
+                backup_file.unlink()  # Remove incomplete backup
                 return False
             
-            self._log_progress(f"✓ Backed up {mod_name} to {backup_file}")
+            # Verify original file still exists (critical - should never be moved)
+            if not mod_file.exists():
+                self._log_progress(f"✗ CRITICAL: Original mod file was removed during backup: {mod_file}")
+                return False
+            
+            self._log_progress(f"✓ Backed up {mod_name} ({format_file_size(original_size)}) to {backup_file}")
             return True
         
         except Exception as e:

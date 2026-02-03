@@ -1,0 +1,54 @@
+=== FACTORIO MOD MANAGER v1.1.0 ===
+Installation Instructions
+
+✓ AUTOMATIC UPGRADE - No manual uninstall needed!
+
+The new installer (v1.1.0) automatically detects and uninstalls the previous version
+before installing the new one. Just run the installer and follow the prompts!
+
+Quick Installation:
+1. Close the app if it's running
+2. Run FactorioModManagerSetup-1.1.0.exe
+3. Follow the installer prompts
+4. The installer will:
+   - Detect the old v1.0.0 version
+   - Automatically uninstall it (you'll see a progress screen)
+   - Install the new v1.1.0 version
+   - Optionally launch the app when done
+5. Verify installation - check title bar shows "v1.1.0"
+
+What's New in v1.1.0:
+✓ Professional notification system (no modal dialogs)
+✓ Confirmation dialogs with action buttons for destructive operations
+✓ Network connectivity detection
+✓ Enhanced error handling with specific error types
+✓ File-based application logging (~/.factorio_mod_manager/logs/app.log)
+✓ Non-blocking UI with proper threading
+✓ Auto-cleanup of downloader tab display
+
+Installation Files:
+- FactorioModManagerSetup-1.1.0.exe - Smart installer with auto-upgrade (19MB)
+- FactorioModManager.exe (in dist/) - Portable standalone executable (18MB)
+
+Advanced: Manual Installation (if auto-upgrade fails)
+1. Go to Settings > Apps > Apps & Features
+2. Find "Factorio Mod Manager" and click Uninstall
+3. Restart your computer
+4. Run FactorioModManagerSetup-1.1.0.exe
+5. Complete installation normally
+
+Troubleshooting:
+If the app still shows v1.0.0 after upgrade:
+- This indicates old files are cached
+- Solution: Restart your computer completely and run the installer again
+- The auto-upgrade feature will detect and remove the old version properly
+
+If Download tab is still empty:
+- The install was successful but app needs restart
+- Close the app completely
+- Run it again fresh - all tabs should now display content
+
+Questions or Issues?
+- Check the logs: ~/.factorio_mod_manager/logs/app.log
+- Visit: https://github.com/Musyoka2020-eng/FactorioManager/issues
+

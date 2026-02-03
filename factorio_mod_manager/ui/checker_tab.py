@@ -6,8 +6,8 @@ from typing import Dict, List, Optional
 from threading import Thread
 from pathlib import Path
 from ..core import ModChecker, Mod, ModStatus
-from ..utils import config, format_file_size
-from .widgets import PlaceholderEntry
+from ..utils import config, format_file_size, is_online
+from .widgets import PlaceholderEntry, NotificationManager
 from .checker_logic import CheckerLogic
 from .checker_presenter import CheckerPresenter
 
@@ -38,6 +38,7 @@ class CheckerTab:
         self.parent = parent
         self.logger = logger or logging.getLogger(__name__)
         self.status_manager = status_manager  # Reference to status manager
+        self.notification_manager: Optional[NotificationManager] = None  # Will be initialized on first use
         self.checker: Optional[ModChecker] = None
         self.logic: Optional[CheckerLogic] = None
         self.presenter = CheckerPresenter()
@@ -55,12 +56,36 @@ class CheckerTab:
         
         self._setup_ui()
     
+    def _get_notification_manager(self) -> NotificationManager:
+        """Get or create notification manager."""
+        if self.notification_manager is None:
+            root = self.frame.winfo_toplevel()
+            self.notification_manager = NotificationManager(root)
+        return self.notification_manager
+    
+    def set_notification_manager(self, manager: NotificationManager) -> None:
+        """Set the notification manager (called by main window)."""
+        self.notification_manager = manager
+    
+    def _notify(self, message: str, notification_type: str = "info", duration_ms: int = 4000, actions: Optional[list] = None) -> None:
+        """
+        Show a notification.
+        
+        Args:
+            message: Notification message
+            notification_type: Type - "success", "error", "warning", or "info"
+            duration_ms: Duration to show (0 = persistent)
+            actions: List of tuples (label, callback) for action buttons
+        """
+        manager = self._get_notification_manager()
+        manager.show(message, notification_type=notification_type, duration_ms=duration_ms, actions=actions)
+    
     def _setup_ui(self) -> None:
         """Setup the UI components with three-column layout."""
         # Configure frame to use grid
         self.frame.grid_rowconfigure(0, weight=1)  # Main content area (left/center/right)
         self.frame.grid_rowconfigure(1, weight=0)  # Log area
-        self.frame.grid_columnconfigure(0, weight=0, minsize=200)  # Left sidebar (fixed width)
+        self.frame.grid_columnconfigure(0, weight=0, minsize=220)  # Left sidebar (fixed width)
         self.frame.grid_columnconfigure(1, weight=1)  # Center (expandable)
         self.frame.grid_columnconfigure(2, weight=0, minsize=280)  # Right sidebar (fixed width)
         
@@ -95,27 +120,31 @@ class CheckerTab:
             text="📁 Mods Folder:",
             bg=self.DARK_BG,
             fg=self.FG_COLOR,
-            font=("Segoe UI", 9)
+            font=("Segoe UI", 9, "bold")
         )
-        folder_label.pack(anchor="w", pady=(0, 3))
+        folder_label.pack(anchor="w", pady=(0, 4))
         
-        folder_frame = tk.Frame(control_frame, bg=self.DARK_BG)
-        folder_frame.pack(fill="x", pady=(0, 10))
+        folder_display_frame = tk.Frame(control_frame, bg=self.DARK_BG)
+        folder_display_frame.pack(fill="x", pady=(0, 10))
+        
+        folder_text_frame = tk.Frame(folder_display_frame, bg="#2a2a2a", relief="sunken", bd=2)
+        folder_text_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
         
         self.folder_var = tk.StringVar(value=config.get("mods_folder", ""))
         self.folder_display = tk.Label(
-            folder_frame,
+            folder_text_frame,
             textvariable=self.folder_var,
-            bg=self.BG_COLOR,
-            fg=self.SECONDARY_FG,
-            font=("Segoe UI", 8),
-            wraplength=180,
-            justify="left"
+            bg="#2a2a2a",
+            fg="#c0c0c0",
+            font=("Courier New", 9),
+            wraplength=125,
+            justify="left",
+            anchor="w"
         )
-        self.folder_display.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        self.folder_display.pack(fill="both", expand=True, padx=6, pady=5)
         
         browse_btn = tk.Button(
-            folder_frame,
+            folder_display_frame,
             text="Browse",
             command=self._browse_folder,
             bg=self.ACCENT_COLOR,
@@ -126,7 +155,7 @@ class CheckerTab:
             pady=3,
             font=("Segoe UI", 8, "bold")
         )
-        browse_btn.pack(side="right", padx=3)
+        browse_btn.pack(side="right")
         
         # Status indicator
         status_frame = tk.Frame(control_frame, bg=self.DARK_BG)
@@ -252,14 +281,22 @@ class CheckerTab:
         center_frame.grid_rowconfigure(1, weight=1)  # Mods list
         center_frame.grid_columnconfigure(0, weight=1)
         
+        # Header with separator
+        center_header_frame = tk.Frame(center_frame, bg=self.DARK_BG)
+        center_header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 8))
+        center_header_frame.grid_columnconfigure(0, weight=1)
+        
         center_header = tk.Label(
-            center_frame,
+            center_header_frame,
             text="📦 Installed Mods",
             font=header_font,
             bg=self.DARK_BG,
             fg=self.FG_COLOR
         )
-        center_header.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
+        center_header.pack(anchor="w")
+        
+        center_separator = tk.Frame(center_header_frame, bg=self.ACCENT_COLOR, height=2)
+        center_separator.pack(anchor="w", fill="x", pady=(5, 0))
         
         # Mods canvas container
         list_container = tk.Frame(center_frame, bg=self.DARK_BG)
@@ -1052,7 +1089,7 @@ class CheckerTab:
         mods_folder = self.folder_var.get()
         
         if not mods_folder:
-            messagebox.showerror("Error", "Please select a mods folder")
+            self._notify("❌ Please select a mods folder", notification_type="error")
             return
         
         self.is_scanning = True
@@ -1071,6 +1108,17 @@ class CheckerTab:
     def _scan_thread(self, mods_folder: str) -> None:
         """Background thread for scanning mods."""
         try:
+            # Check network connectivity first
+            is_online_status, _ = is_online()
+            if not is_online_status:
+                self._log_progress("[SCAN] ✗ Network error: You are offline", "error")
+                self._update_status("Offline - Cannot scan", self.ERROR_COLOR)
+                self.frame.after(500, lambda: self._notify(
+                    "📡 You are offline. Mods cannot be scanned for updates without internet connection.",
+                    notification_type="warning"
+                ))
+                return
+            
             self._update_status("Scanning mods...", self.ACCENT_COLOR)
             self._log_progress("[SCAN] Starting mod scan...", "info")
             
@@ -1089,13 +1137,22 @@ class CheckerTab:
             self._update_stats()
             
             self._update_status(f"Ready - {len(self.mods)} mods", self.SUCCESS_COLOR)
-            # Delay messagebox to ensure status bar updates first
-            self.frame.after(500, lambda: messagebox.showinfo("Scan Complete", f"Found {len(self.mods)} mod(s)\n\nStatus, versions, and download counts are now available!"))
+            # Show notification instead of messagebox (schedule on main thread)
+            self.frame.after(500, lambda: self._notify(
+                f"✓ Scan complete! Found {len(self.mods)} mod(s) with latest information.",
+                notification_type="success",
+                duration_ms=5000
+            ))
         
         except Exception as e:
             self._log_progress(f"[SCAN] ✗ Error: {e}", "error")
             self._update_status("Scan failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Scan failed: {e}")
+            error_msg = str(e)
+            self.frame.after(500, lambda: self._notify(
+                f"Scan failed: {error_msg}",
+                notification_type="error",
+                duration_ms=6000
+            ))
         
         finally:
             self.is_scanning = False
@@ -1109,7 +1166,7 @@ class CheckerTab:
     def _start_check(self) -> None:
         """Start checking for updates."""
         if not self.checker:
-            messagebox.showerror("Error", "Please scan mods first")
+            self._notify("❌ Please scan mods first", notification_type="error")
             return
         
         self.check_btn.config(state="disabled")
@@ -1135,14 +1192,14 @@ class CheckerTab:
             self._update_status("Ready", self.SUCCESS_COLOR)
             
             if was_refreshed:
-                messagebox.showinfo("Check Complete", f"Check finished. {len(outdated)} update(s) available")
+                self.frame.after(500, lambda: self._notify(f"✓ Check finished. {len(outdated)} update(s) available", notification_type="success", duration_ms=5000))
             else:
-                messagebox.showinfo("Check Complete", "Data is fresh. No refresh needed.")
+                self.frame.after(500, lambda: self._notify("✓ Data is fresh. No refresh needed.", notification_type="info", duration_ms=4000))
         
         except Exception as e:
             self._log_progress(f"[CHECK] ✗ Error: {e}", "error")
             self._update_status("Check failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Check failed: {e}")
+            self.frame.after(500, lambda: self._notify(f"Check failed: {e}", notification_type="error", duration_ms=6000))
         
         finally:
             self.check_btn.config(state="normal")
@@ -1152,7 +1209,7 @@ class CheckerTab:
     def _update_selected(self) -> None:
         """Update selected mods."""
         if not self.selected_mods:
-            messagebox.showwarning("Warning", "Please select at least one mod")
+            self._notify("Please select at least one mod", notification_type="warning")
             return
         
         self._do_update(list(self.selected_mods))
@@ -1166,7 +1223,7 @@ class CheckerTab:
         outdated = [name for name, mod in self.mods.items() if mod.is_outdated]
         
         if not outdated:
-            messagebox.showinfo("Info", "No outdated mods found")
+            self._notify("ℹ️ No outdated mods found", notification_type="info")
             return
         
         self._do_update(outdated)
@@ -1204,16 +1261,16 @@ class CheckerTab:
             
             self._update_status("Ready", self.SUCCESS_COLOR)
             
-            msg = f"Updated {len(successful)} mod(s)"
+            msg = f"✓ Updated {len(successful)} mod(s)"
             if failed:
-                msg += f"\nFailed: {', '.join(failed)}"
+                msg += f" ({len(failed)} failed)"
             
-            messagebox.showinfo("Update Complete", msg)
+            self.frame.after(500, lambda: self._notify(msg, notification_type="success" if not failed else "warning", duration_ms=5000))
         
         except Exception as e:
             self._log_progress(f"[UPDATE] ✗ Error: {e}", "error")
             self._update_status("Update failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Update failed: {e}")
+            self.frame.after(500, lambda: self._notify(f"Update failed: {e}", notification_type="error", duration_ms=6000))
         
         finally:
             self.update_btn.config(state="normal")
@@ -1222,28 +1279,32 @@ class CheckerTab:
     def _delete_selected(self) -> None:
         """Delete selected mods."""
         if not self.selected_mods:
-            messagebox.showwarning("Warning", "Please select at least one mod to delete")
+            self._notify("Please select at least one mod to delete", notification_type="warning")
             return
         
         selected_mods = list(self.selected_mods)
         
-        # Confirm deletion
-        mod_list = "\n".join([f"  • {name}" for name in selected_mods])
-        response = messagebox.askyesno(
-            "Confirm Deletion",
-            f"Delete these {len(selected_mods)} mod(s)?\n\n{mod_list}\n\nThis cannot be undone!"
-        )
+        # Show confirmation notification with action buttons
+        mod_list = ", ".join(selected_mods[:3]) + (f" and {len(selected_mods)-3} more..." if len(selected_mods) > 3 else "")
+        confirm_msg = f"Delete {len(selected_mods)} mod(s): {mod_list}? This cannot be undone!"
         
-        if not response:
-            return
+        # Define confirmation callback
+        def on_confirm():
+            self.delete_btn.config(state="disabled")
+            thread = Thread(
+                target=self._delete_thread,
+                args=(selected_mods,),
+                daemon=True
+            )
+            thread.start()
         
-        self.delete_btn.config(state="disabled")
-        thread = Thread(
-            target=self._delete_thread,
-            args=(selected_mods,),
-            daemon=True
+        # Show confirmation with action buttons
+        self._notify(
+            confirm_msg,
+            notification_type="warning",
+            duration_ms=0,  # Persistent - don't auto-dismiss
+            actions=[("Delete", on_confirm), ("Cancel", lambda: None)]
         )
-        thread.start()
     
     def _delete_thread(self, mod_names: List[str]) -> None:
         """Background thread for deleting mods."""
@@ -1266,16 +1327,16 @@ class CheckerTab:
             
             self._update_status("Ready", self.SUCCESS_COLOR)
             
-            msg = f"Deleted {len(deleted)} mod(s)"
+            msg = f"✓ Deleted {len(deleted)} mod(s)"
             if failed:
-                msg += f"\n\nFailed ({len(failed)}):\n" + "\n".join([f"  • {f}" for f in failed])
+                msg += f" ({len(failed)} failed)"
             
-            messagebox.showinfo("Delete Complete", msg)
+            self.frame.after(500, lambda: self._notify(msg, notification_type="success" if not failed else "warning", duration_ms=5000))
         
         except Exception as e:
             self._log_progress(f"[DELETE] ✗ Error: {e}", "error")
             self._update_status("Delete failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Delete failed: {e}")
+            self.frame.after(500, lambda: self._notify(f"Delete failed: {e}", notification_type="error", duration_ms=6000))
         
         finally:
             self.delete_btn.config(state="normal")
@@ -1285,36 +1346,38 @@ class CheckerTab:
         mods_folder = Path(self.folder_var.get())
         
         if not mods_folder.exists():
-            messagebox.showerror("Error", "Mods folder not found")
+            self._notify("Mods folder not found", notification_type="error")
             return
         
         # Check for the main backup folder inside mods
         backup_folder = mods_folder / "backup"
         
         if not backup_folder.exists():
-            messagebox.showinfo("Info", "No backup folder found")
+            self._notify("ℹ️ No backup folder found", notification_type="info")
             return
         
         # Calculate backup folder size
         backup_size = sum(f.stat().st_size for f in backup_folder.rglob("*") if f.is_file())
         backup_size_mb = backup_size / (1024 * 1024)
         
-        # Confirm deletion
-        response = messagebox.askyesno(
-            "Confirm Deletion",
-            f"Delete backup folder?\n\nSize: {backup_size_mb:.2f} MB\n\nThis will free up disk space.\n\nThis cannot be undone!"
-        )
+        # Show confirmation with action buttons
+        confirm_msg = f"Delete backup folder? ({backup_size_mb:.2f} MB) This cannot be undone!"
         
-        if not response:
-            return
+        def on_confirm():
+            self.delete_backups_btn.config(state="disabled")
+            thread = Thread(
+                target=self._delete_backups_thread,
+                args=(backup_folder,),
+                daemon=True
+            )
+            thread.start()
         
-        self.delete_backups_btn.config(state="disabled")
-        thread = Thread(
-            target=self._delete_backups_thread,
-            args=(backup_folder,),
-            daemon=True
+        self._notify(
+            confirm_msg,
+            notification_type="warning",
+            duration_ms=0,
+            actions=[("Delete", on_confirm), ("Cancel", lambda: None)]
         )
-        thread.start()
     
     def _delete_backups_thread(self, backup_folder: Path) -> None:
         """Background thread for deleting backup folder."""
@@ -1328,13 +1391,14 @@ class CheckerTab:
             folder_size_mb = self.logic.clean_backups(str(backup_folder))
             self._update_status("Ready", self.SUCCESS_COLOR)
             
-            msg = f"Deleted backup folder\nFreed {folder_size_mb:.2f} MB"
-            messagebox.showinfo("Cleanup Complete", msg)
+            msg = f"✓ Backup deleted - Freed {folder_size_mb:.2f} MB"
+            self.frame.after(500, lambda: self._notify(msg, notification_type="success"))
         
         except Exception as e:
             self._log_progress(f"[CLEANUP] ✗ Error: {e}", "error")
             self._update_status("Cleanup failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Cleanup failed: {e}")
+            error_msg = f"❌ Cleanup failed: {e}"
+            self.frame.after(500, lambda: self._notify(error_msg, notification_type="error"))
         
         finally:
             self.delete_backups_btn.config(state="normal")
@@ -1342,7 +1406,7 @@ class CheckerTab:
     def _backup_selected(self) -> None:
         """Backup selected mods to the backup folder inside mods folder."""
         if not self.selected_mods:
-            messagebox.showwarning("Warning", "Please select at least one mod to backup")
+            self._notify("⚠️ Please select at least one mod to backup", notification_type="warning")
             return
         
         # Create backup folder inside mods folder
@@ -1384,16 +1448,17 @@ class CheckerTab:
             self._log_progress(f"[BACKUP] ✓ Complete! Backed up {len(backed_up)} mod(s)", "success")
             self._update_status("Ready", self.SUCCESS_COLOR)
             
-            msg = f"Backed up {len(backed_up)} mod(s) to:\n{backup_folder}"
+            msg = f"✓ Backed up {len(backed_up)} mod(s)"
             if failed:
-                msg += f"\n\nFailed ({len(failed)}):\n" + "\n".join([f"  • {m}" for m in failed])
+                msg += f" ({len(failed)} failed)"
             
-            messagebox.showinfo("Backup Complete", msg)
+            self.frame.after(500, lambda: self._notify(msg, notification_type="success"))
         
         except Exception as e:
             self._log_progress(f"[BACKUP] ✗ Error: {e}", "error")
             self._update_status("Backup failed", self.ERROR_COLOR)
-            messagebox.showerror("Error", f"Backup failed: {e}")
+            error_msg = f"❌ Backup failed: {e}"
+            self.frame.after(500, lambda: self._notify(error_msg, notification_type="error"))
         
         finally:
             self.backup_btn.config(state="normal")

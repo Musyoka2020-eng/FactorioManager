@@ -1,9 +1,27 @@
 """Factorio Mod Portal API integration."""
 import re
-from typing import Dict, List, Optional, Any
-import requests
-from bs4 import BeautifulSoup
+from typing import Dict, List, Optional, Any, Tuple
+import requests # type: ignore
+from bs4 import BeautifulSoup # type: ignore
 from .mod import Mod, FACTORIO_EXPANSIONS
+
+
+class PortalAPIError(Exception):
+    """Custom exception for portal API errors."""
+    
+    def __init__(self, message: str, error_type: str = "unknown", status_code: Optional[int] = None):
+        """
+        Initialize API error.
+        
+        Args:
+            message: Error message for user
+            error_type: Type of error - "offline", "not_found", "server_error", "timeout", "unknown"
+            status_code: HTTP status code if applicable
+        """
+        super().__init__(message)
+        self.message = message
+        self.error_type = error_type
+        self.status_code = status_code
 
 
 class FactorioPortalAPI:
@@ -35,6 +53,9 @@ class FactorioPortalAPI:
             
         Returns:
             Dictionary with mod info or None if not found
+            
+        Raises:
+            PortalAPIError: With specific error type (offline, not_found, server_error, timeout)
         """
         try:
             # Use /full endpoint to get complete info including full info_json with dependencies
@@ -44,10 +65,42 @@ class FactorioPortalAPI:
             )
             if response.status_code == 200:
                 return response.json()
+            elif response.status_code == 404:
+                raise PortalAPIError(
+                    f"Mod '{mod_name}' not found on the portal",
+                    error_type="not_found",
+                    status_code=404
+                )
+            elif response.status_code in [500, 502, 503, 504]:
+                raise PortalAPIError(
+                    f"Factorio portal server error ({response.status_code}). Please try again later.",
+                    error_type="server_error",
+                    status_code=response.status_code
+                )
+            else:
+                raise PortalAPIError(
+                    f"API returned status {response.status_code}",
+                    error_type="server_error",
+                    status_code=response.status_code
+                )
+        except requests.exceptions.ConnectionError as e:
+            raise PortalAPIError(
+                "Cannot connect to Factorio portal. Check your internet connection.",
+                error_type="offline"
+            )
+        except requests.exceptions.Timeout:
+            raise PortalAPIError(
+                "Connection to Factorio portal timed out. Please try again.",
+                error_type="timeout"
+            )
+        except PortalAPIError:
+            # Re-raise our custom errors
+            raise
         except Exception as e:
-            print(f"Error fetching mod {mod_name} from API: {e}")
-        
-        return None
+            raise PortalAPIError(
+                f"Error fetching mod '{mod_name}': {str(e)}",
+                error_type="unknown"
+            )
 
     def get_mod_download_url(self, mod_name: str, version: str) -> Optional[str]:
         """
@@ -59,6 +112,9 @@ class FactorioPortalAPI:
             
         Returns:
             Download URL or None
+            
+        Raises:
+            PortalAPIError: With specific error type
         """
         try:
             mod_data = self.get_mod(mod_name)
@@ -73,11 +129,15 @@ class FactorioPortalAPI:
                         return f"{self.BASE_URL}/download/{filename}"
             
             return None
+        except PortalAPIError:
+            raise
         except Exception as e:
-            print(f"Error getting download URL for {mod_name}@{version}: {e}")
-            return None
+            raise PortalAPIError(
+                f"Error getting download URL for {mod_name}@{version}: {str(e)}",
+                error_type="unknown"
+            )
 
-    def get_mod_dependencies(self, mod_name: str) -> tuple[List[str], List[str], List[str], List[str]]:
+    def get_mod_dependencies(self, mod_name: str) -> Tuple[List[str], List[str], List[str], List[str]]:
         """
         Get dependencies for a mod.
         
@@ -86,6 +146,9 @@ class FactorioPortalAPI:
             
         Returns:
             Tuple of (required_dependencies, optional_dependencies, incompatible_dependencies, expansion_dependencies)
+            
+        Raises:
+            PortalAPIError: With specific error type
         """
         try:
             mod_data = self.get_mod(mod_name)
@@ -136,9 +199,13 @@ class FactorioPortalAPI:
                                 dependencies.append(dep_name)
             
             return dependencies, optional_dependencies, incompatible_dependencies, expansion_dependencies
+        except PortalAPIError:
+            raise
         except Exception as e:
-            print(f"Error getting dependencies for {mod_name}: {e}")
-            return [], [], [], []
+            raise PortalAPIError(
+                f"Error getting dependencies for {mod_name}: {str(e)}",
+                error_type="unknown"
+            )
 
     def parse_mod_from_portal(self, mod_name: str) -> Optional[Mod]:
         """
