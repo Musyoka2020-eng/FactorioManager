@@ -78,8 +78,8 @@ class MainWindow:
         self.downloader_tab.set_notification_manager(self.notification_manager)
         self.checker_tab.set_notification_manager(self.notification_manager)
         
-        self.notebook.add(self.downloader_tab.frame, text="⬇️  Downloader")
-        self.notebook.add(self.checker_tab.frame, text="✓  Checker & Updates")
+        self.notebook.add(self.downloader_tab.frame, text="⬇️ Downloader")
+        self.notebook.add(self.checker_tab.frame, text="✓ Checker & Updates")
         
         # Add logger tab if queue is available
         if log_queue:

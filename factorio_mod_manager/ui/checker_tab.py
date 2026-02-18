@@ -272,6 +272,20 @@ class CheckerTab:
         )
         self.backup_btn.pack(fill="x", pady=2, padx=3)
         
+        self.view_info_btn = tk.Button(
+            button_frame,
+            text="ℹ️  View Details",
+            command=self._show_mod_details,
+            bg="#0078d4",
+            fg="#ffffff",
+            activebackground="#1084d7",
+            relief="flat",
+            pady=6,
+            font=("Segoe UI", 8, "bold"),
+            state="disabled"
+        )
+        self.view_info_btn.pack(fill="x", pady=2, padx=3)
+        
         # ============================================
         # CENTER - INSTALLED MODS LIST
         # ============================================
@@ -880,10 +894,16 @@ class CheckerTab:
             self.update_btn.config(state="normal")
             self.delete_btn.config(state="normal")
             self.backup_btn.config(state="normal")
+            # View Details button only enabled when exactly one mod is selected
+            if len(self.selected_mods) == 1:
+                self.view_info_btn.config(state="normal")
+            else:
+                self.view_info_btn.config(state="disabled")
         else:
             self.update_btn.config(state="disabled")
             self.delete_btn.config(state="disabled")
             self.backup_btn.config(state="disabled")
+            self.view_info_btn.config(state="disabled")
     
     def _on_mod_selected(self, mod_name: str) -> None:
         """Handle mod selection (deprecated, kept for compatibility)."""
@@ -1462,3 +1482,245 @@ class CheckerTab:
         
         finally:
             self.backup_btn.config(state="normal")
+    
+    def _show_mod_details(self) -> None:
+        """Show detailed information about selected mod in a popup window."""
+        if not self.selected_mods:
+            self._notify("⚠️ Please select a mod to view details", notification_type="warning")
+            return
+        
+        # Get the first selected mod
+        mod_name = list(self.selected_mods)[0]
+        if mod_name not in self.mods:
+            self._notify("Mod not found", notification_type="error")
+            return
+        
+        mod = self.mods[mod_name]
+        
+        # Create popup window
+        popup = tk.Toplevel(self.frame.winfo_toplevel())
+        popup.title(f"Mod Details - {mod.title or mod.name}")
+        popup.configure(bg=self.DARK_BG)
+        
+        # Set larger size and center the window
+        window_width = 1000
+        window_height = 800
+        
+        # Update window to get screen dimensions
+        popup.update_idletasks()
+        screen_width = popup.winfo_screenwidth()
+        screen_height = popup.winfo_screenheight()
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # Set geometry with position
+        popup.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Make it stay on top
+        popup.attributes("-topmost", True)
+        
+        # Main scrollable frame
+        main_frame = tk.Frame(popup, bg=self.DARK_BG)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Scrollbar
+        scrollbar = tk.Scrollbar(main_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        canvas = tk.Canvas(
+            main_frame,
+            bg=self.BG_COLOR,
+            highlightthickness=0,
+            yscrollcommand=scrollbar.set
+        )
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=canvas.yview)
+        
+        # Content frame inside canvas
+        content_frame = tk.Frame(canvas, bg=self.BG_COLOR)
+        canvas.create_window((0, 0), window=content_frame, anchor="nw", tags="content")
+        
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig("content", width=event.width)
+        
+        content_frame.bind("<Configure>", on_frame_configure)
+        
+        # Bind mousewheel to canvas
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind("<MouseWheel>", on_mousewheel)
+        content_frame.bind("<MouseWheel>", on_mousewheel)
+        popup.bind("<MouseWheel>", on_mousewheel)
+        
+        # Title section
+        title_label = tk.Label(
+            content_frame,
+            text=mod.title or mod.name,
+            bg=self.BG_COLOR,
+            fg=self.FG_COLOR,
+            font=("Segoe UI", 14, "bold"),
+            wraplength=650,
+            justify="left"
+        )
+        title_label.pack(anchor="w", pady=(0, 5))
+        
+        # Mod name (internal)
+        if mod.name != (mod.title or mod.name):
+            name_label = tk.Label(
+                content_frame,
+                text=f"Internal: {mod.name}",
+                bg=self.BG_COLOR,
+                fg=self.SECONDARY_FG,
+                font=("Segoe UI", 9)
+            )
+            name_label.pack(anchor="w", pady=(0, 10))
+        
+        # Info section
+        info_frame = tk.Frame(content_frame, bg=self.BG_COLOR)
+        info_frame.pack(anchor="w", fill="x", pady=(0, 10))
+        
+        info_items = [
+            ("Author:", mod.author or "Unknown"),
+            ("Current Version:", mod.version or "Unknown"),
+            ("Latest Version:", mod.latest_version or mod.version or "Unknown"),
+            ("Status:", "Up to Date" if mod.status == ModStatus.UP_TO_DATE else "Outdated" if mod.status == ModStatus.OUTDATED else "Unknown"),
+            ("Downloads:", f"{mod.downloads:,}" if mod.downloads else "0"),
+            ("URL:", mod.url or "N/A"),
+        ]
+        
+        for label, value in info_items:
+            item_frame = tk.Frame(info_frame, bg=self.BG_COLOR)
+            item_frame.pack(fill="x", pady=2)
+            
+            label_widget = tk.Label(
+                item_frame,
+                text=label,
+                bg=self.BG_COLOR,
+                fg=self.FG_COLOR,
+                font=("Segoe UI", 9, "bold"),
+                width=15,
+                anchor="w"
+            )
+            label_widget.pack(side="left", padx=(0, 10))
+            
+            value_widget = tk.Label(
+                item_frame,
+                text=value,
+                bg=self.BG_COLOR,
+                fg=self.SECONDARY_FG,
+                font=("Segoe UI", 9),
+                wraplength=550,
+                justify="left",
+                anchor="w"
+            )
+            value_widget.pack(side="left", fill="x", expand=True)
+        
+        # Separator
+        tk.Frame(content_frame, bg=self.ACCENT_COLOR, height=1).pack(fill="x", pady=10)
+        
+        # Description section
+        desc_header = tk.Label(
+            content_frame,
+            text="📝 Description",
+            bg=self.BG_COLOR,
+            fg=self.FG_COLOR,
+            font=("Segoe UI", 11, "bold")
+        )
+        desc_header.pack(anchor="w", pady=(0, 5))
+        
+        if mod.description:
+            desc_label = tk.Label(
+                content_frame,
+                text=mod.description,
+                bg=self.BG_COLOR,
+                fg=self.SECONDARY_FG,
+                font=("Segoe UI", 9),
+                wraplength=650,
+                justify="left",
+                anchor="nw"
+            )
+            desc_label.pack(anchor="w", fill="x", pady=(0, 10))
+        else:
+            no_desc = tk.Label(
+                content_frame,
+                text="No description available",
+                bg=self.BG_COLOR,
+                fg=self.SECONDARY_FG,
+                font=("Segoe UI", 9, "italic")
+            )
+            no_desc.pack(anchor="w", pady=(0, 10))
+        
+        # Changelog section - fetch from portal
+        tk.Frame(content_frame, bg=self.ACCENT_COLOR, height=1).pack(fill="x", pady=10)
+        
+        changelog_header = tk.Label(
+            content_frame,
+            text="📋 Changelog",
+            bg=self.BG_COLOR,
+            fg=self.FG_COLOR,
+            font=("Segoe UI", 11, "bold")
+        )
+        changelog_header.pack(anchor="w", pady=(0, 5))
+        
+        # Show loading message while fetching
+        loading_label = tk.Label(
+            content_frame,
+            text="Loading changelog...",
+            bg=self.BG_COLOR,
+            fg=self.SECONDARY_FG,
+            font=("Segoe UI", 9, "italic")
+        )
+        loading_label.pack(anchor="w", pady=(0, 10))
+        
+        # Fetch changelog in background thread
+        def fetch_changelog_thread():
+            try:
+                from ..core.portal import FactorioPortalAPI
+                portal = FactorioPortalAPI()
+                changelog_data = portal.get_mod_changelog(mod.name)
+                
+                # Clear loading label
+                loading_label.pack_forget()
+                
+                if changelog_data:
+                    # Show last 5 versions
+                    versions = sorted(changelog_data.keys(), key=lambda v: [int(x) for x in v.split('.')], reverse=True)[:5]
+                    for version in versions:
+                        version_label = tk.Label(
+                            content_frame,
+                            text=f"Version {version}",
+                            bg=self.BG_COLOR,
+                            fg=self.ACCENT_COLOR,
+                            font=("Segoe UI", 10, "bold")
+                        )
+                        version_label.pack(anchor="w", pady=(5, 2))
+                        
+                        changelog_text = changelog_data[version]
+                        changelog_label = tk.Label(
+                            content_frame,
+                            text=changelog_text if changelog_text else "No changelog provided",
+                            bg=self.BG_COLOR,
+                            fg=self.SECONDARY_FG,
+                            font=("Segoe UI", 9),
+                            wraplength=630,
+                            justify="left",
+                            anchor="nw"
+                        )
+                        changelog_label.pack(anchor="w", fill="x", padx=(10, 0), pady=(0, 5))
+                else:
+                    no_changelog = tk.Label(
+                        content_frame,
+                        text="No changelog available",
+                        bg=self.BG_COLOR,
+                        fg=self.SECONDARY_FG,
+                        font=("Segoe UI", 9, "italic")
+                    )
+                    no_changelog.pack(anchor="w", pady=(0, 10))
+            except Exception as e:
+                loading_label.config(text=f"Error loading changelog: {e}")
+        
+        thread = Thread(target=fetch_changelog_thread, daemon=True)
+        thread.start()
+
