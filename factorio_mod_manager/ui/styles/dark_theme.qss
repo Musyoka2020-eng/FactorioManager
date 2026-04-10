@@ -255,6 +255,14 @@ QFrame#headerSeparator {{
     border: none;
 }}
 
+QLabel#headerTitle {{
+    color: {FG_PRIMARY};
+}}
+
+QLabel#headerSubtitle {{
+    color: {FG_SECONDARY};
+}}
+
 /* ── Group Box ────────────────────────────────────────────── */
 QGroupBox {{
     background-color: {BG_PANEL};

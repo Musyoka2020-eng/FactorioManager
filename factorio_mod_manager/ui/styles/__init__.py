@@ -7,7 +7,7 @@ def load_stylesheet() -> str:
     """Load and parameterize dark_theme.qss with token values.
 
     Returns:
-        Fully-resolved QSS string ready for QApplication.setStyleSheet().
+        Fully-resolved QSS string ready for QApplication styling.
     """
     qss_path = Path(__file__).parent / "dark_theme.qss"
     template = qss_path.read_text(encoding="utf-8")

@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -47,9 +48,22 @@ class LoggerTab(QWidget):
             log_bridge.log_record.connect(self._append_log)
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 0, 16, 0)
+        page_title = QLabel("Logs")
+        page_title.setObjectName("pageTitle")
+        header_layout.addWidget(page_title)
+        header_layout.addStretch()
+        clear_btn = QPushButton("Clear Log")
+        clear_btn.clicked.connect(self.clear_logs)
+        header_layout.addWidget(clear_btn)
+        root.addWidget(header)
 
         # Log display — monospace, read-only, color-coded via insertHtml
         self.log_text = QTextEdit()
@@ -57,15 +71,7 @@ class LoggerTab(QWidget):
         mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         mono_font.setPointSize(10)
         self.log_text.setFont(mono_font)
-        layout.addWidget(self.log_text)
-
-        # Bottom toolbar — Clear button right-aligned (PREP-04 behavior)
-        toolbar = QHBoxLayout()
-        toolbar.addStretch()
-        clear_btn = QPushButton("Clear Log")
-        clear_btn.clicked.connect(self.clear_logs)
-        toolbar.addWidget(clear_btn)
-        layout.addLayout(toolbar)
+        root.addWidget(self.log_text, stretch=1)
 
     @Slot(str, str)
     def _append_log(self, message: str, level_name: str) -> None:

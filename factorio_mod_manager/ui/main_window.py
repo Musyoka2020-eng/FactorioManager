@@ -90,12 +90,14 @@ class MainWindow(QMainWindow):
         title_row.setSpacing(0)
 
         title_label = QLabel("🏭 Factorio Mod Manager v1.1.0")
+        # Inline style removed — now in dark_theme.qss#headerTitle
+        title_label.setObjectName("headerTitle")
         title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #e0e0e0;")
 
         subtitle_label = QLabel("Manage your Factorio mods")
+        # Inline style removed — now in dark_theme.qss#headerSubtitle
+        subtitle_label.setObjectName("headerSubtitle")
         subtitle_label.setFont(QFont("Segoe UI", 9))
-        subtitle_label.setStyleSheet("color: #b0b0b0;")
         subtitle_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         title_row.addWidget(title_label)
