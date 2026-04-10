@@ -24,7 +24,7 @@ Requirements for the v1.0 UI Redesign milestone. Each maps to roadmap phases.
 ### User Interface and Experience (Phase 2)
 
 - [x] **UXUI-01**: User sees a consistent Fluent glassy visual system across the main shell, Downloader, Checker, and Logs
-- [ ] **UXUI-02**: User can move between app sections using a consistent navigation and layout hierarchy
+- [x] **UXUI-02**: User can move between app sections using a consistent navigation and layout hierarchy
 - [x] **UXUI-03**: User receives immediate, non-blocking feedback for all high-frequency actions (download, scan, update)
 
 ### Search and Filtering (Phase 3)
@@ -94,7 +94,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | PLAT-02 | Phase 1 | Pending |
 | PLAT-03 | Phase 1 | Pending |
 | UXUI-01 | Phase 2 | Complete |
-| UXUI-02 | Phase 2 | Pending |
+| UXUI-02 | Phase 2 | Complete |
 | UXUI-03 | Phase 2 | Complete |
 | SRCH-01 | Phase 3 | Pending |
 | SRCH-02 | Phase 3 | Pending |
