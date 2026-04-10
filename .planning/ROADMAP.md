@@ -60,7 +60,11 @@ Plans:
 1. User sees a consistent Fluent glassy visual system in Main shell, Downloader, Checker, and Logs.
 2. User can move between app sections using a consistent navigation and layout hierarchy.
 3. User receives immediate, non-blocking feedback for high-frequency actions.
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 02-01-PLAN.md — Style foundation: new tokens, QSS selectors, NotificationManager severity durations + event_key dedup
+- [ ] 02-02-PLAN.md — Shell navigation refactor: QTabWidget → left rail + QStackedWidget
+- [ ] 02-03-PLAN.md — Downloader page redesign: two-column staged flow, QSplitter, inline style purge
+- [ ] 02-04-PLAN.md — Checker + Logs page scaffolds, final inline style audit, human checkpoint
 **UI hint**: yes
 
 ### Phase 3: Search, Filtering, and Settings Foundation
