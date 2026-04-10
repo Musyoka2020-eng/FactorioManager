@@ -12,6 +12,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -120,8 +121,22 @@ class SearchWorker(QThread):
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            results: List[dict] = portal.search_mods(self._query, limit=8)
-            self.result.emit(results)
+            # Fetch 25 so client-side ranking has enough candidates
+            raw: List[dict] = portal.search_mods(self._query, limit=25)
+            q = self._query.lower()
+
+            def _rank(entry):
+                name  = (entry.get("name")  or "").lower()
+                title = (entry.get("title") or "").lower()
+                if name == q or title == q:   return 0  # exact
+                if name.startswith(q):        return 1  # name prefix
+                if title.startswith(q):       return 2  # title prefix
+                if q in name:                 return 3  # name contains
+                if q in title:                return 4  # title contains
+                return 5
+
+            raw.sort(key=_rank)
+            self.result.emit(raw[:8])
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -155,7 +170,9 @@ class DownloaderTab(QWidget):
         self.logger = logging.getLogger(__name__)
         self.status_manager = status_manager
         self.notification_manager: Optional[NotificationManager] = None
-        self._active_worker = None       # prevents GC before signal delivery
+        self._search_worker  = None      # keeps SearchWorker alive until done
+        self._resolve_worker = None      # keeps ResolveWorker alive until done
+        self._active_worker  = None      # keeps DownloadWorker alive until done
         self._sidebar_labels: Dict[str, QLabel] = {}  # mod_name -> status QLabel
         self._setup_ui()
         self._restore_config()
@@ -195,18 +212,68 @@ class DownloaderTab(QWidget):
         url_row.addWidget(self.load_btn)
         root.addLayout(url_row)
 
-        # Mod info label (shown after resolve)
-        self.mod_info_label = QLabel("")
-        self.mod_info_label.setWordWrap(True)
-        self.mod_info_label.setStyleSheet("color: #b0b0b0; font-size: 12px;")
-        root.addWidget(self.mod_info_label)
-
         # Search results dropdown list (hidden until user types)
         self.search_results_list = QListWidget()
         self.search_results_list.setMaximumHeight(160)
         self.search_results_list.setVisible(False)
         self.search_results_list.itemClicked.connect(self._on_result_selected)
         root.addWidget(self.search_results_list)
+
+        # Mod info panel (shown after resolve)
+        self.info_panel = QFrame()
+        self.info_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        self.info_panel.setStyleSheet("QFrame { background: #1e2228; border: 1px solid #3a3f47; border-radius: 4px; }")
+        self.info_panel.setVisible(False)
+        info_vbox = QVBoxLayout(self.info_panel)
+        info_vbox.setContentsMargins(10, 8, 10, 8)
+        info_vbox.setSpacing(4)
+
+        title_row = QHBoxLayout()
+        self.info_title_lbl = QLabel("")
+        self.info_title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #e8e8e8; background: transparent; border: none;")
+        self.info_author_lbl = QLabel("")
+        self.info_author_lbl.setStyleSheet("color: #9aaab4; font-size: 11px; background: transparent; border: none;")
+        self.info_author_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.info_title_lbl, stretch=1)
+        title_row.addWidget(self.info_author_lbl)
+        info_vbox.addLayout(title_row)
+
+        self.info_meta_lbl = QLabel("")
+        self.info_meta_lbl.setStyleSheet("color: #707070; font-size: 11px; background: transparent; border: none;")
+        info_vbox.addWidget(self.info_meta_lbl)
+
+        self.info_summary_lbl = QLabel("")
+        self.info_summary_lbl.setWordWrap(True)
+        self.info_summary_lbl.setStyleSheet("color: #c0c0c0; font-size: 12px; margin-top: 4px; background: transparent; border: none;")
+        self.info_summary_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        info_vbox.addWidget(self.info_summary_lbl)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("background: #3a3f47; border: none; max-height: 1px; margin-top: 4px;")
+        info_vbox.addWidget(divider)
+
+        deps_hdr = QLabel("Dependencies")
+        deps_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #9aaab4; background: transparent; border: none; margin-top: 2px;")
+        info_vbox.addWidget(deps_hdr)
+
+        self.deps_required_lbl = QLabel("")
+        self.deps_optional_lbl = QLabel("")
+        self.deps_base_lbl     = QLabel("")
+        self.deps_incompat_lbl = QLabel("")
+        _dep_styles = [
+            (self.deps_required_lbl, "#e0e0e0"),
+            (self.deps_optional_lbl, "#9aaab4"),
+            (self.deps_base_lbl,     "#7ec8e3"),
+            (self.deps_incompat_lbl, "#d13438"),
+        ]
+        for _lbl, _color in _dep_styles:
+            _lbl.setWordWrap(True)
+            _lbl.setStyleSheet(f"color: {_color}; font-size: 11px; background: transparent; border: none;")
+            _lbl.setVisible(False)
+            info_vbox.addWidget(_lbl)
+
+        root.addWidget(self.info_panel)
 
         # Folder row
         folder_row = QHBoxLayout()
@@ -251,7 +318,8 @@ class DownloaderTab(QWidget):
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Cascadia Code", 9))
         self.console.setPlaceholderText("Download progress will appear here…")
-        left_col.addWidget(self.console, stretch=1)
+        self.console.setMaximumHeight(120)
+        left_col.addWidget(self.console)
         progress_row.addLayout(left_col, stretch=1)
 
         # Right sidebar (fixed 220 px) — per-mod status rows
@@ -333,18 +401,32 @@ class DownloaderTab(QWidget):
 
     def _on_url_changed(self, text):
         self._search_timer.stop()
-        if text.strip():
-            self._search_timer.start()
+        stripped = text.strip()
+        if not stripped:
+            self.search_results_list.setVisible(False)
+            self.info_panel.setVisible(False)
+            return
+        # Skip live search when the field already contains a URL
+        if stripped.startswith("http") or "mods.factorio.com" in stripped:
+            return
+        self._search_timer.start()
 
     def _perform_search(self):
         """Run after 500 ms debounce: fetch mod info in background."""
         query = self.url_edit.text().strip()
         if not query:
             return
+        # Show placeholder immediately so the user knows something is happening
+        self.search_results_list.clear()
+        placeholder = QListWidgetItem("Searching\u2026")
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.search_results_list.addItem(placeholder)
+        self.search_results_list.setVisible(True)
+
         worker = SearchWorker(query, parent=self)
-        self._active_worker = worker
+        self._search_worker = worker
         worker.result.connect(self._on_search_result)
-        worker.error.connect(lambda _e: None)   # silent fail
+        worker.error.connect(lambda _e: self.search_results_list.setVisible(False))
         worker.start()
 
     @Slot(list)
@@ -352,23 +434,33 @@ class DownloaderTab(QWidget):
         self.search_results_list.clear()
         if not results:
             self.search_results_list.setVisible(False)
-            self._active_worker = None
+            self._search_worker = None
             return
         for entry in results:
-            name = entry.get("name", "")
-            title = entry.get("title") or name
-            author = entry.get("owner", "")
-            display = f"{title}  by {author}" if author else title
+            name    = entry.get("name", "")
+            title   = entry.get("title") or name
+            author  = entry.get("owner", "")
+            dl      = entry.get("downloads_count", 0)
+            display = f"{title}  ({name})"
+            if author:
+                display += f"  by {author}"
+            if dl:
+                display += f"  \u00b7 {dl:,}\u2193"
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, name)
             self.search_results_list.addItem(item)
         self.search_results_list.setVisible(True)
-        self._active_worker = None
+        self._search_worker = None
 
     def _on_result_selected(self, item: QListWidgetItem):
         mod_name = item.data(Qt.ItemDataRole.UserRole)
+        # Block textChanged so the debounce timer doesn't re-trigger search
+        self.url_edit.blockSignals(True)
         self.url_edit.setText(f"https://mods.factorio.com/mod/{mod_name}")
+        self.url_edit.blockSignals(False)
         self.search_results_list.setVisible(False)
+        # Automatically load the mod info panel
+        self._on_load_mod()
 
     def _on_load_mod(self):
         url = self.url_edit.text().strip()
@@ -376,9 +468,10 @@ class DownloaderTab(QWidget):
             self._notify("Please enter a mod URL or name.", "error")
             return
         self.search_results_list.setVisible(False)
+        self.info_panel.setVisible(False)
         self.load_btn.setEnabled(False)
         worker = ResolveWorker(url, parent=self)
-        self._active_worker = worker
+        self._resolve_worker = worker
         worker.resolved.connect(self._on_resolved)
         worker.error.connect(self._on_resolve_error)
         worker.finished.connect(lambda: self.load_btn.setEnabled(True))
@@ -386,13 +479,50 @@ class DownloaderTab(QWidget):
 
     @Slot(object)
     def _on_resolved(self, info):
-        title = info.get("title") or info.get("name", "")
-        author = info.get("owner", "")
+        title   = info.get("title") or info.get("name", "")
+        author  = info.get("owner", "")
         summary = info.get("summary", "")
-        parts = [f"📦 {title}  by {author}"]
-        if summary:
-            parts.append(summary[:120])
-        self.mod_info_label.setText("  |  ".join(parts))
+        downloads = info.get("downloads_count", 0)
+
+        releases = info.get("releases", [])
+        version         = ""
+        factorio_version = ""
+        if releases:
+            latest = releases[-1]
+            version          = latest.get("version", "")
+            factorio_version = latest.get("factorio_version", "")
+
+        self.info_title_lbl.setText(title)
+        self.info_author_lbl.setText(f"by {author}" if author else "")
+
+        meta_parts = []
+        if version:
+            meta_parts.append(f"v{version}")
+        if downloads:
+            meta_parts.append(f"{downloads:,} downloads")
+        if factorio_version:
+            meta_parts.append(f"Factorio {factorio_version}")
+        self.info_meta_lbl.setText("  \u00b7  ".join(meta_parts))
+
+        self.info_summary_lbl.setText(summary[:240] if summary else "")
+        self.info_summary_lbl.setVisible(bool(summary))
+
+        # Parse and display dependencies
+        req, opt, base, incompat = self._parse_deps(info)
+        for lbl, prefix, items in (
+            (self.deps_required_lbl,  "Required:",     req),
+            (self.deps_optional_lbl,  "Optional:",     opt),
+            (self.deps_base_lbl,      "Base/Game:",    base),
+            (self.deps_incompat_lbl,  "Incompatible:", incompat),
+        ):
+            if items:
+                lbl.setText(f"<b>{prefix}</b>  {', '.join(items)}")
+                lbl.setVisible(True)
+            else:
+                lbl.setVisible(False)
+
+        self.info_panel.setVisible(True)
+        self._resolve_worker = None
 
     @Slot(str)
     def _on_resolve_error(self, err):
@@ -411,6 +541,42 @@ class DownloaderTab(QWidget):
         if path:
             self.folder_edit.setText(path)
             config.set("mods_folder", path)
+
+    # ------------------------------------------------------------------
+    # Dependency parser (runs on the main thread from raw API dict)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_deps(info):
+        """Return (required, optional, base, incompatible) lists from raw portal dict."""
+        from ..core.mod import FACTORIO_EXPANSIONS
+        releases = info.get("releases", [])
+        if not releases:
+            return [], [], [], []
+        deps_raw = releases[-1].get("info_json", {}).get("dependencies", [])
+        required, optional, base, incompatible = [], [], [], []
+        for dep in deps_raw:
+            dep = dep.strip()
+            if not dep or dep == "base" or dep.startswith("base "):
+                continue
+            if dep.startswith("!"):
+                name = re.split(r"[\s><=!]", dep[1:].strip())[0]
+                if name:
+                    incompatible.append(name)
+            elif dep.startswith("(?)") or dep.startswith("?"):
+                clean = dep.replace("(?)", "").replace("?", "").strip()
+                name  = re.split(r"[\s><=!]", clean)[0]
+                if name in FACTORIO_EXPANSIONS:
+                    base.append(name)
+                elif name:
+                    optional.append(name)
+            else:
+                name = re.split(r"[\s><=!]", dep)[0]
+                if name in FACTORIO_EXPANSIONS:
+                    base.append(name)
+                elif name:
+                    required.append(name)
+        return required, optional, base, incompatible
 
     # ------------------------------------------------------------------
     # Download
