@@ -98,6 +98,7 @@ Expressed as `setContentsMargins()` and `setSpacing()` integer pixel values. All
 **Explicit exceptions (not on the scale):**
 - Header separator: `setFixedHeight(1)` — 1 px rule
 - Status bar: `setFixedHeight(28)` — fixed for parity
+- `SPACING_NOTIF_V = 10` — parity-locked from Tkinter `pady=10` (notification frame vertical padding); used in `setContentsMargins(12, 10, 12, 10)` on the toast `QFrame`
 - Downloader per-mod sidebar: `setFixedWidth(220)` — column constraint
 - Checker left sidebar: `setFixedWidth(220)` — column constraint
 - Checker right sidebar: `setFixedWidth(280)` — column constraint
@@ -114,10 +115,12 @@ Expressed as `setContentsMargins()` and `setSpacing()` integer pixel values. All
 |------|------|--------|------------------------|-------|
 | Body | 10 pt | Normal | `QFont.Weight.Normal` | Tab content, log lines, table rows, notification message body |
 | Label / UI | 9 pt | Normal | `QFont.Weight.Normal` | Field labels, column headers, button text, secondary text |
-| Section heading | 11 pt | SemiBold | `QFont.Weight.DemiBold` | Tab labels, sidebar section headings |
+| Section heading | 11 pt | Bold | `QFont.Weight.Bold` | Tab labels, sidebar section headings |
 | Window title | 14 pt | Bold | `QFont.Weight.Bold` | Main window header label |
 | Notification icon | 14 pt | Bold | `QFont.Weight.Bold` | Toast glyph characters (✓, ✗, ⚠, ℹ) |
 | Log / console | 10 pt | Normal | `QFont.Weight.Normal` | Monospace `QTextEdit` in Logs tab; use `QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)` |
+
+**Declared weights (2 max):** Normal (`QFont.Weight.Normal`) + Bold (`QFont.Weight.Bold`). `DemiBold`/`SemiBold` is not used in this spec.
 
 ---
 
@@ -407,7 +410,7 @@ Displayed in the **Status** column of the `QTableWidget`.
 |-------|------|
 | Body | `"Delete {N} selected mod(s)? This cannot be undone."` |
 | Confirm button | `"Delete"` (destructive style) |
-| Cancel button | `"Cancel"` (default style) |
+| Cancel button | `"Keep Mod(s)"` (default style) |
 
 ### Clean Backups Confirmation (persistent notification)
 
@@ -415,7 +418,7 @@ Displayed in the **Status** column of the `QTableWidget`.
 |-------|------|
 | Body | `"Delete backup folder? ({X.XX} MB) This cannot be undone!"` |
 | Confirm button | `"Delete"` (destructive style) |
-| Cancel button | `"Cancel"` (default style) |
+| Cancel button | `"Keep Backups"` (default style) |
 
 ### Logs Tab
 
