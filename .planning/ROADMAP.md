@@ -6,6 +6,7 @@ v1.0 Ui Redesign
 
 ## Phases
 
+- [ ] **Phase 0: Pre-Migration Cleanup** - Remove dead code and known bugs from the Tkinter app; write behavioral parity checklist for Phase 1 verification.
 - [ ] **Phase 1: Qt Platform Migration and Behavior Parity** - Move all user-facing screens to a single Qt stack while preserving existing downloader, checker, and logging behavior.
 - [ ] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
 - [ ] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
@@ -15,9 +16,22 @@ v1.0 Ui Redesign
 
 ## Phase Details
 
+### Phase 0: Pre-Migration Cleanup
+**Goal**: Remove dead code, fix known Tkinter bugs, and document all current behaviors so Phase 1 has a clear parity target.
+**Depends on**: Nothing (first phase)
+**Requirements**: PREP-01, PREP-02, PREP-03, PREP-04, PREP-05
+**Success Criteria** (what must be TRUE):
+1. `selenium` dependency is removed from `pyproject.toml` and the build spec.
+2. Credential auth session setup is removed from `ModDownloader` and `FactorioPortalAPI`; no dead auth code remains.
+3. Download button re-enables after a failed offline check without restarting the app.
+4. A Clear Log button exists in the Logs tab and calls `LoggerTab.clear_logs()`.
+5. A behavioral parity checklist file exists in `.planning/` documenting all Tkinter-specific behaviors (debounce timing, auto-scroll, threading patterns, notification types, status bar behavior) that the Qt migration must replicate.
+**Plans**: TBD
+**UI hint**: no
+
 ### Phase 1: Qt Platform Migration and Behavior Parity
 **Goal**: Users interact with a fully Qt-based app without losing existing download, update-check, and logging capabilities.
-**Depends on**: Nothing (first phase)
+**Depends on**: Phase 0
 **Requirements**: PLAT-01, PLAT-02, PLAT-03
 **Success Criteria** (what must be TRUE):
 1. User can launch and use all primary app screens through one Qt UI path only.
@@ -43,23 +57,25 @@ v1.0 Ui Redesign
 **Requirements**: SRCH-01, SRCH-02, SRCH-03, SETT-01, SETT-02, SETT-03
 **Success Criteria** (what must be TRUE):
 1. User can run one unified search across installed, downloadable, and queued mods.
-2. User can filter and sort mod lists by required states and priorities without leaving current workflow context.
-3. User can manage account/token, paths, behavior, and appearance from centralized settings.
-4. User can switch theme mode and bounded visual customization options and see changes reflected in the app.
-5. User sees credential fields masked and validated, and credentials persist safely across sessions.
+2. User can filter and sort mod lists by status and priority without leaving their current workflow context.
+3. User can browse and search the Factorio portal by keyword or category from within the app.
+4. User can manage paths, behavior, and appearance from a centralized settings panel.
+5. User can switch theme mode (dark / light / system) and see changes reflected immediately.
+6. User can view and edit `max_workers`, `auto_backup`, and `auto_refresh` config keys through settings. (Note: these keys already exist in `Config.DEFAULTS` — this phase builds the UI over the pre-existing schema, not the schema itself.)
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 4: Queue Control and Profile Workflows
-**Goal**: Users can control execution flow safely and switch between mod-set profiles with preview and rollback confidence.
+**Goal**: Users can control execution flow safely, switch between mod-set profiles with preview and rollback confidence, and toggle individual mods.
 **Depends on**: Phase 3
-**Requirements**: QUEUE-01, QUEUE-02, QUEUE-03, QUEUE-04, PROF-01, PROF-02, PROF-03, PROF-04
+**Requirements**: QUEUE-01, QUEUE-02, PROF-01, PROF-02, PROF-03, PROF-04, PROF-05
 **Success Criteria** (what must be TRUE):
 1. User can pause, resume, reorder, and cancel queued or running operations with clear status transitions.
 2. User can recover from failed operations using actionable options such as retry, skip, or inspect.
 3. User can save current mod selection as a named profile and seed profiles from starter presets.
 4. User can preview the apply diff before switching profile and explicitly confirm the changes.
 5. User can apply a profile and undo through a reversible snapshot.
+6. User can enable or disable individual mods via `mod-list.json` toggle inside the app.
 **Plans**: TBD
 **UI hint**: yes
 
@@ -73,6 +89,7 @@ v1.0 Ui Redesign
 3. User can clearly identify required, optional, incompatible, and missing dependency states in the graph.
 4. User can view update classifications as safe, review, or risky with rationale for each recommendation.
 5. User can send assistant-recommended batch actions into queue workflow.
+6. User can view per-mod changelog content inside the mod details popup.
 **Plans**: TBD
 **UI hint**: yes
 
@@ -91,7 +108,8 @@ v1.0 Ui Redesign
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Qt Platform Migration and Behavior Parity | 3/3 | Complete   | 2026-04-09 |
+| 0. Pre-Migration Cleanup | 0/0 | Not started | - |
+| 1. Qt Platform Migration and Behavior Parity | 0/0 | Not started | - |
 | 2. Fluent Shell and UX System | 0/0 | Not started | - |
 | 3. Search, Filtering, and Settings Foundation | 0/0 | Not started | - |
 | 4. Queue Control and Profile Workflows | 0/0 | Not started | - |
