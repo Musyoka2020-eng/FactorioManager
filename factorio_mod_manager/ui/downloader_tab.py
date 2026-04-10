@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -186,10 +187,19 @@ class DownloaderTab(QWidget):
     def set_notification_manager(self, manager: NotificationManager) -> None:
         self.notification_manager = manager
 
-    def _notify(self, message, notif_type="info", duration_ms=4000, actions=None):
+    def _notify(
+        self,
+        message: str,
+        notif_type: str = "info",
+        duration_ms: int = 4000,
+        actions=None,
+    ) -> None:
         if self.notification_manager is not None:
             self.notification_manager.show(
-                message, notif_type=notif_type, duration_ms=duration_ms, actions=actions
+                message,
+                notification_type=notif_type,
+                duration_ms=duration_ms,
+                actions=actions,
             )
 
     # ------------------------------------------------------------------
@@ -197,11 +207,47 @@ class DownloaderTab(QWidget):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        from .styles.tokens import SIDE_PANEL_WIDTH
 
-        # URL row
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Page header zone
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 0, 16, 0)
+        page_title = QLabel("Downloader")
+        page_title.setObjectName("pageTitle")
+        header_layout.addWidget(page_title)
+        header_layout.addStretch()
+
+        self.download_btn_header = QPushButton("Download Mods")
+        self.download_btn_header.setObjectName("accentButton")
+        self.download_btn_header.setEnabled(False)
+        self.download_btn_header.clicked.connect(self._on_download)
+        header_layout.addWidget(self.download_btn_header)
+        root.addWidget(header)
+
+        # Body splitter: staged workflow + side panel
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(1)
+        root.addWidget(splitter, stretch=1)
+
+        # Left column: staged flow
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(16, 16, 8, 16)
+        left_layout.setSpacing(12)
+
+        # Stage 1: URL input and search
+        self._stage1_widget = QWidget()
+        s1_layout = QVBoxLayout(self._stage1_widget)
+        s1_layout.setContentsMargins(0, 0, 0, 0)
+        s1_layout.setSpacing(8)
+
         url_row = QHBoxLayout()
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(
@@ -212,72 +258,100 @@ class DownloaderTab(QWidget):
         self.load_btn.clicked.connect(self._on_load_mod)
         url_row.addWidget(self.url_edit, stretch=1)
         url_row.addWidget(self.load_btn)
-        root.addLayout(url_row)
+        s1_layout.addLayout(url_row)
 
-        # Search results dropdown list (hidden until user types)
         self.search_results_list = QListWidget()
         self.search_results_list.setMaximumHeight(160)
         self.search_results_list.setVisible(False)
         self.search_results_list.itemClicked.connect(self._on_result_selected)
-        root.addWidget(self.search_results_list)
+        s1_layout.addWidget(self.search_results_list)
+        left_layout.addWidget(self._stage1_widget)
 
-        # Mod info panel (shown after resolve)
+        # Stage 2: mod details and dependencies
+        self._stage2_widget = QWidget()
+        self._stage2_widget.setVisible(False)
+        s2_layout = QVBoxLayout(self._stage2_widget)
+        s2_layout.setContentsMargins(0, 0, 0, 0)
+        s2_layout.setSpacing(8)
+
         self.info_panel = QFrame()
-        self.info_panel.setFrameShape(QFrame.Shape.StyledPanel)
-        self.info_panel.setStyleSheet("QFrame { background: #1e2228; border: 1px solid #3a3f47; border-radius: 4px; }")
-        self.info_panel.setVisible(False)
+        self.info_panel.setObjectName("infoCard")
         info_vbox = QVBoxLayout(self.info_panel)
-        info_vbox.setContentsMargins(10, 8, 10, 8)
+        info_vbox.setContentsMargins(12, 10, 12, 10)
         info_vbox.setSpacing(4)
 
         title_row = QHBoxLayout()
         self.info_title_lbl = QLabel("")
-        self.info_title_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #e8e8e8; background: transparent; border: none;")
+        self.info_title_lbl.setObjectName("modTitle")
+        self.info_title_lbl.setTextFormat(Qt.TextFormat.PlainText)
         self.info_author_lbl = QLabel("")
-        self.info_author_lbl.setStyleSheet("color: #9aaab4; font-size: 11px; background: transparent; border: none;")
-        self.info_author_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.info_author_lbl.setObjectName("modAuthor")
+        self.info_author_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.info_author_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         title_row.addWidget(self.info_title_lbl, stretch=1)
         title_row.addWidget(self.info_author_lbl)
         info_vbox.addLayout(title_row)
 
         self.info_meta_lbl = QLabel("")
-        self.info_meta_lbl.setStyleSheet("color: #707070; font-size: 11px; background: transparent; border: none;")
+        self.info_meta_lbl.setObjectName("modMeta")
+        self.info_meta_lbl.setTextFormat(Qt.TextFormat.PlainText)
         info_vbox.addWidget(self.info_meta_lbl)
 
         self.info_summary_lbl = QLabel("")
+        self.info_summary_lbl.setObjectName("modSummary")
+        self.info_summary_lbl.setTextFormat(Qt.TextFormat.PlainText)
         self.info_summary_lbl.setWordWrap(True)
-        self.info_summary_lbl.setStyleSheet("color: #c0c0c0; font-size: 12px; margin-top: 4px; background: transparent; border: none;")
-        self.info_summary_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.info_summary_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         info_vbox.addWidget(self.info_summary_lbl)
 
         self._dep_divider = QFrame()
+        self._dep_divider.setObjectName("depDivider")
         self._dep_divider.setFrameShape(QFrame.Shape.HLine)
-        self._dep_divider.setStyleSheet("background: #3a3f47; border: none; max-height: 1px; margin-top: 4px;")
         info_vbox.addWidget(self._dep_divider)
 
         self.deps_hdr = QLabel("Dependencies")
-        self.deps_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #9aaab4; background: transparent; border: none; margin-top: 2px;")
+        self.deps_hdr.setObjectName("depsHeader")
         info_vbox.addWidget(self.deps_hdr)
 
         self.deps_required_lbl = QLabel("")
         self.deps_optional_lbl = QLabel("")
-        self.deps_base_lbl     = QLabel("")
+        self.deps_base_lbl = QLabel("")
         self.deps_incompat_lbl = QLabel("")
-        _dep_styles = [
-            (self.deps_required_lbl, "#e0e0e0"),
-            (self.deps_optional_lbl, "#9aaab4"),
-            (self.deps_base_lbl,     "#7ec8e3"),
-            (self.deps_incompat_lbl, "#d13438"),
-        ]
-        for _lbl, _color in _dep_styles:
-            _lbl.setWordWrap(True)
-            _lbl.setStyleSheet(f"color: {_color}; font-size: 11px; background: transparent; border: none;")
-            _lbl.setVisible(False)
-            info_vbox.addWidget(_lbl)
+        for dep_lbl in (
+            self.deps_required_lbl,
+            self.deps_optional_lbl,
+            self.deps_base_lbl,
+            self.deps_incompat_lbl,
+        ):
+            dep_lbl.setWordWrap(True)
+            dep_lbl.setTextFormat(Qt.TextFormat.PlainText)
+            dep_lbl.setVisible(False)
+            info_vbox.addWidget(dep_lbl)
 
-        root.addWidget(self.info_panel)
+        self.deps_required_lbl.setProperty("depType", "required")
+        self.deps_optional_lbl.setProperty("depType", "optional")
+        self.deps_base_lbl.setProperty("depType", "base")
+        self.deps_incompat_lbl.setProperty("depType", "incompatible")
 
-        # Folder row
+        s2_layout.addWidget(self.info_panel)
+
+        self.optional_checkbox = QCheckBox("Include optional dependencies")
+        s2_layout.addWidget(self.optional_checkbox)
+
+        left_layout.addWidget(self._stage2_widget)
+
+        # Stage 3: folder + download
+        self._stage3_widget = QWidget()
+        self._stage3_widget.setVisible(False)
+        s3_layout = QVBoxLayout(self._stage3_widget)
+        s3_layout.setContentsMargins(0, 0, 0, 0)
+        s3_layout.setSpacing(8)
+
         folder_row = QHBoxLayout()
         folder_label = QLabel("Mods Folder:")
         self.folder_edit = QLineEdit()
@@ -288,61 +362,70 @@ class DownloaderTab(QWidget):
         folder_row.addWidget(folder_label)
         folder_row.addWidget(self.folder_edit, stretch=1)
         folder_row.addWidget(browse_btn)
-        root.addLayout(folder_row)
+        s3_layout.addLayout(folder_row)
 
-        # Options row
-        options_row = QHBoxLayout()
-        self.optional_checkbox = QCheckBox("Include optional dependencies")
-        options_row.addWidget(self.optional_checkbox)
-        options_row.addStretch()
-        root.addLayout(options_row)
-
-        # Download button
-        self.download_btn = QPushButton("Download")
+        self.download_btn = QPushButton("Download Mods")
         self.download_btn.setObjectName("accentButton")
         self.download_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
         )
         self.download_btn.clicked.connect(self._on_download)
-        root.addWidget(self.download_btn)
+        s3_layout.addWidget(self.download_btn)
 
-        # Progress section (QHBoxLayout: left col + right sidebar)
-        progress_row = QHBoxLayout()
-        progress_row.setSpacing(12)
+        left_layout.addWidget(self._stage3_widget)
 
-        left_col = QVBoxLayout()
+        # Progress area
+        self._progress_widget = QWidget()
+        self._progress_widget.setVisible(False)
+        prog_layout = QVBoxLayout(self._progress_widget)
+        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setSpacing(8)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        left_col.addWidget(self.progress_bar)
+        prog_layout.addWidget(self.progress_bar)
 
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Cascadia Code", 9))
         self.console.setPlaceholderText("Download progress will appear here…")
-        self.console.setMaximumHeight(120)
-        left_col.addWidget(self.console)
-        progress_row.addLayout(left_col, stretch=1)
+        prog_layout.addWidget(self.console, stretch=1)
 
-        # Right sidebar (fixed 220 px) — per-mod status rows
+        left_layout.addWidget(self._progress_widget, stretch=1)
+        left_layout.addStretch()
+
+        splitter.addWidget(left_widget)
+        splitter.setStretchFactor(0, 1)
+
+        # Right column: contextual side panel
+        right_frame = QFrame()
+        right_frame.setObjectName("sidePanel")
+        right_frame.setFixedWidth(SIDE_PANEL_WIDTH)
+        right_layout = QVBoxLayout(right_frame)
+        right_layout.setContentsMargins(8, 12, 8, 8)
+        right_layout.setSpacing(4)
+
+        side_hdr = QLabel("Selected Mod")
+        side_hdr.setObjectName("depsHeader")
+        right_layout.addWidget(side_hdr)
+
         self._sidebar_scroll = QScrollArea()
-        self._sidebar_scroll.setFixedWidth(220)
         self._sidebar_scroll.setWidgetResizable(True)
         self._sidebar_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self._sidebar_inner = QWidget()
         self._sidebar_layout = QVBoxLayout(self._sidebar_inner)
-        self._sidebar_layout.setContentsMargins(4, 4, 4, 4)
+        self._sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self._sidebar_layout.setSpacing(4)
         self._sidebar_layout.addStretch()
         self._sidebar_scroll.setWidget(self._sidebar_inner)
-        progress_row.addWidget(self._sidebar_scroll)
+        right_layout.addWidget(self._sidebar_scroll, stretch=1)
 
-        self.progress_bar.setVisible(False)
-        self._sidebar_scroll.setVisible(False)
-
-        root.addLayout(progress_row, stretch=1)
+        splitter.addWidget(right_frame)
+        splitter.setStretchFactor(1, 0)
 
         # Debounce timer (500 ms)
         self._search_timer = QTimer(self)
@@ -375,11 +458,11 @@ class DownloaderTab(QWidget):
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
         name_label = QLabel(mod_name)
-        name_label.setStyleSheet("color: #e0e0e0; font-size: 11px;")
+        name_label.setProperty("sidebarRole", "name")
         name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         status_label = QLabel(status_text)
-        color = _MOD_STATUS_COLORS.get(status_text, "#b0b0b0")
-        status_label.setStyleSheet(f"color: {color}; font-size: 11px;")
+        status_label.setProperty("sidebarRole", "status")
+        status_label.setProperty("statusState", status_text)
         row_layout.addWidget(name_label)
         row_layout.addWidget(status_label)
         # Insert before the trailing stretch
@@ -483,7 +566,7 @@ class DownloaderTab(QWidget):
         worker.start()
 
     @Slot(object)
-    def _on_resolved(self, info):
+    def _populate_mod_info(self, info):
         title   = info.get("title") or info.get("name", "")
         author  = info.get("owner", "")
         summary = info.get("summary", "")
@@ -521,7 +604,7 @@ class DownloaderTab(QWidget):
             (self.deps_incompat_lbl,  "Incompatible:", incompat),
         ):
             if items:
-                lbl.setText(f"<b>{prefix}</b>  {', '.join(items)}")
+                lbl.setText(f"{prefix} {', '.join(items)}")
                 lbl.setVisible(True)
             else:
                 lbl.setVisible(False)
@@ -533,9 +616,13 @@ class DownloaderTab(QWidget):
         self.info_panel.setVisible(True)
         self._resolve_worker = None
 
+    @Slot(object)
+    def _on_resolved(self, info):
+        self._populate_mod_info(info)
+
     @Slot(str)
-    def _on_resolve_error(self, err):
-        self._notify(f"Could not resolve mod: {err}", "error")
+    def _on_resolve_error(self, error_msg: str) -> None:
+        self._notify(f"Could not resolve mod: {error_msg}", "error")
 
     # ------------------------------------------------------------------
     # Browse folder
@@ -608,8 +695,7 @@ class DownloaderTab(QWidget):
         # Reset UI
         self.search_results_list.setVisible(False)
         self.download_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self._sidebar_scroll.setVisible(True)
+        self._progress_widget.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setProperty("completed", "false")
         self.progress_bar.style().unpolish(self.progress_bar)
@@ -641,8 +727,7 @@ class DownloaderTab(QWidget):
         if mod_name in self._sidebar_labels:
             label = self._sidebar_labels[mod_name]
             label.setText(status_text)
-            color = _MOD_STATUS_COLORS.get(status_text, "#b0b0b0")
-            label.setStyleSheet(f"color: {color}; font-size: 11px;")
+            label.setProperty("statusState", status_text)
         else:
             self._add_sidebar_row(mod_name, status_text)
 
