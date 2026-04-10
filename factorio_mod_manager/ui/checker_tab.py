@@ -167,7 +167,10 @@ class CheckerTab(QWidget):
     def _notify(self, message, notif_type="info", duration_ms=4000, actions=None):
         if self.notification_manager is not None:
             self.notification_manager.show(
-                message, notif_type=notif_type, duration_ms=duration_ms, actions=actions
+                message,
+                notification_type=notif_type,
+                duration_ms=duration_ms,
+                actions=actions,
             )
 
     # ------------------------------------------------------------------
