@@ -2,10 +2,10 @@
 
 ## Current Position
 
-**Phase:** Not started (requirements defined, ready to plan Phase 0)
-**Plan:** —
-**Status:** Planning
-**Last activity:** 2026-04-10 — Milestone v1.0 planning updated; REQUIREMENTS.md created; Phase 0 added to roadmap
+**Phase:** Phase 0 — Pre-Migration Cleanup
+**Plan:** Plans 01–03 created, Wave 1 (all parallel)
+**Status:** Ready to execute
+**Last activity:** 2026-04-10 — Phase 0 planned (3 plans, Wave 1)
 
 ## Accumulated Context
 
@@ -23,7 +23,7 @@ None.
 
 ## Todos
 
-- [ ] Plan Phase 0: Pre-Migration Cleanup
+- [ ] Execute Phase 0: Pre-Migration Cleanup (3 plans, all Wave 1 — run in parallel)
 
 ---
 *Last updated: 2026-04-10*

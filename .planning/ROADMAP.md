@@ -26,7 +26,11 @@ v1.0 Ui Redesign
 3. Download button re-enables after a failed offline check without restarting the app.
 4. A Clear Log button exists in the Logs tab and calls `LoggerTab.clear_logs()`.
 5. A behavioral parity checklist file exists in `.planning/` documenting all Tkinter-specific behaviors (debounce timing, auto-scroll, threading patterns, notification types, status bar behavior) that the Qt migration must replicate.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 00-01-PLAN.md — Remove selenium dep and dead credential auth session from core
+- [ ] 00-02-PLAN.md — Fix download button disabled bug; wire Clear log button
+- [ ] 00-03-PLAN.md — Write behavioral parity checklist for Phase 1 verification
 **UI hint**: no
 
 ### Phase 1: Qt Platform Migration and Behavior Parity
@@ -108,7 +112,7 @@ v1.0 Ui Redesign
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 0. Pre-Migration Cleanup | 0/0 | Not started | - |
+| 0. Pre-Migration Cleanup | 0/3 | Ready to execute | - |
 | 1. Qt Platform Migration and Behavior Parity | 0/0 | Not started | - |
 | 2. Fluent Shell and UX System | 0/0 | Not started | - |
 | 3. Search, Filtering, and Settings Foundation | 0/0 | Not started | - |
