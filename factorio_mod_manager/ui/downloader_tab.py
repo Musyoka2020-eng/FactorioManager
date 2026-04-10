@@ -68,8 +68,8 @@ class DownloadWorker(QThread):
 
             downloader.set_overall_progress_callback(_on_progress)
             downloader.set_mod_progress_callback(_on_mod_status)
-            success_count, failed = downloader.download_mod(self._mod_url, self._mods_folder)
-            self.finished.emit(len(failed) == 0, failed)
+            success = downloader.download_mod(self._mod_url, self._mods_folder)
+            self.finished.emit(success, [])
         except PortalAPIError as exc:
             self.log_message.emit(str(exc), "ERROR")
             self.finished.emit(False, [])
