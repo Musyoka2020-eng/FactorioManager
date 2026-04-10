@@ -63,8 +63,8 @@ Plans:
 **Plans**: 4 plans
 - [x] 02-01-PLAN.md — Style foundation: new tokens, QSS selectors, NotificationManager severity durations + event_key dedup
 - [x] 02-02-PLAN.md — Shell navigation refactor: QTabWidget → left rail + QStackedWidget
-- [ ] 02-03-PLAN.md — Downloader page redesign: two-column staged flow, QSplitter, inline style purge
-- [ ] 02-04-PLAN.md — Checker + Logs page scaffolds, final inline style audit, human checkpoint
+- [x] 02-03-PLAN.md — Downloader page redesign: two-column staged flow, QSplitter, inline style purge
+- [x] 02-04-PLAN.md — Checker + Logs page scaffolds, final inline style audit, human checkpoint
 **UI hint**: yes
 
 ### Phase 3: Search, Filtering, and Settings Foundation
