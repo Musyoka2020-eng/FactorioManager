@@ -41,7 +41,15 @@ Plans:
 1. User can launch and use all primary app screens through one Qt UI path only.
 2. User cannot access any legacy Tkinter production screen path.
 3. User can complete download, update check, and log viewing workflows with behavior equivalent to the pre-migration app.
-**Plans**: TBD
+**Plans**: 6 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Foundation: PySide6 deps, dark_theme.qss, tokens.py, main.py entry point
+- [ ] 01-02-PLAN.md — QMainWindow shell and QObject StatusManager
+- [ ] 01-03-PLAN.md — Notification and NotificationManager (QFrame overlay, QGraphicsOpacityEffect fade)
+- [ ] 01-04-PLAN.md — LoggerTab (QTextEdit) and LogSignalBridge logger handler
+- [ ] 01-05-PLAN.md — DownloaderTab with DownloadWorker/ResolveWorker/SearchWorker QThreads
+- [ ] 01-06-PLAN.md — CheckerTab with ScanWorker/UpdateCheckWorker QThreads and three-column layout
 **UI hint**: yes
 
 ### Phase 2: Fluent Shell and UX System
