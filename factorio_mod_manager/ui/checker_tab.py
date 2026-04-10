@@ -43,7 +43,7 @@ from .checker_presenter import CheckerPresenter
 class ScanWorker(QThread):
     """Runs CheckerLogic.scan_mods() in a background thread."""
 
-    mods_loaded = Signal(dict)      # Dict[str, Mod] on success
+    mods_loaded = Signal(object)    # Dict[str, Mod] on success
     log_message = Signal(str, str)  # (message, level_name)
     error = Signal(str)
 
@@ -66,7 +66,7 @@ class ScanWorker(QThread):
 class UpdateCheckWorker(QThread):
     """Runs CheckerLogic.check_updates() in a background thread."""
 
-    check_complete = Signal(dict, bool)  # (outdated_mods, was_refreshed)
+    check_complete = Signal(object, bool)  # (outdated_mods, was_refreshed)
     log_message = Signal(str, str)
     error = Signal(str)
 
@@ -133,6 +133,8 @@ _STATUS_COLORS: Dict[ModStatus, tuple] = {
 class CheckerTab(QWidget):
     """Qt UI for mod checker / updater."""
 
+    _log_signal = Signal(str, str)   # thread-safe bridge for op-log writes
+
     def __init__(self, logger=None, status_manager=None, parent=None):
         super().__init__(parent)
         self.logger = logger or logging.getLogger(__name__)
@@ -153,6 +155,7 @@ class CheckerTab(QWidget):
 
         self._setup_ui()
         self._restore_config()
+        self._log_signal.connect(self._append_op_log)
 
     # ------------------------------------------------------------------
     # NotificationManager interface
@@ -359,7 +362,10 @@ class CheckerTab(QWidget):
             return False
         if self._checker is None or str(self._checker.mods_folder) != folder:
             self._checker = ModChecker(folder)
-            self._logic = CheckerLogic(self._checker, self._append_op_log)
+            self._logic = CheckerLogic(
+                self._checker,
+                lambda msg, level="INFO": self._log_signal.emit(msg, level),
+            )
         return True
 
     # ------------------------------------------------------------------
@@ -407,7 +413,7 @@ class CheckerTab(QWidget):
             self.mod_table.setItem(row, 2, status_item)
 
             # Col 3: version
-            installed = mod.installed_version or "?"
+            installed = mod.version or "?"
             latest = mod.latest_version or "?"
             version_text = f"{installed} → {latest}" if mod.status == ModStatus.OUTDATED else installed
             self.mod_table.setItem(row, 3, QTableWidgetItem(version_text))
@@ -426,7 +432,7 @@ class CheckerTab(QWidget):
         self.stat_uptodate.setText(f"Up to date: {stats.get('up_to_date', 0)}")
         self.stat_outdated.setText(f"Outdated: {stats.get('outdated', 0)}")
         self.stat_unknown.setText(f"Unknown: {stats.get('unknown', 0)}")
-        dl = stats.get("downloads", 0)
+        dl = sum(m.downloads for m in mods.values() if m.downloads)
         self.stat_downloads.setText(f"Downloads: {dl:,}")
 
     def _update_button_states(self):
@@ -511,7 +517,7 @@ class CheckerTab(QWidget):
         self._active_worker = None
         self._update_button_states()
 
-    @Slot(dict)
+    @Slot(object)
     def _on_mods_loaded(self, mods: dict):
         self._mods = mods
         self._populate_table(mods)
@@ -527,7 +533,7 @@ class CheckerTab(QWidget):
         if self.status_manager:
             self.status_manager.push_status("Operation failed", "error")
 
-    @Slot(dict, bool)
+    @Slot(object, bool)
     def _on_check_complete(self, outdated: dict, was_refreshed: bool):
         self._mods.update(outdated)
         self._populate_table(self._mods)
@@ -690,7 +696,7 @@ class CheckerTab(QWidget):
             f"Name: {mod_name}",
             f"Title: {title}",
             f"Author: {mod.author or 'Unknown'}",
-            f"Installed: {mod.installed_version or '?'}",
+            f"Installed: {mod.version or '?'}",
             f"Latest: {mod.latest_version or '?'}",
             f"Status: {mod.status.name}",
         ]

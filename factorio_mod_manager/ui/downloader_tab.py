@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import html as html_lib
 import logging
+import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QFont
@@ -14,6 +15,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -81,7 +84,7 @@ class DownloadWorker(QThread):
 class ResolveWorker(QThread):
     """QThread that resolves a mod URL to a mod info dict (Load Mod button)."""
 
-    resolved = Signal(dict)
+    resolved = Signal(object)
     error = Signal(str)
 
     def __init__(self, mod_url, parent=None):
@@ -91,7 +94,10 @@ class ResolveWorker(QThread):
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            info = portal.get_mod_by_url(self._mod_url)
+            # Extract mod name from URL or treat input as a bare mod name
+            m = re.search(r'/mod/([^/?&\s]+)', self._mod_url)
+            mod_name = m.group(1) if m else self._mod_url.strip()
+            info = portal.get_mod(mod_name)
             self.resolved.emit(info)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -102,9 +108,9 @@ class ResolveWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class SearchWorker(QThread):
-    """QThread that looks up a search query on the portal."""
+    """QThread that searches the portal for mods matching a query string."""
 
-    result = Signal(dict)
+    result = Signal(list)
     error = Signal(str)
 
     def __init__(self, query, parent=None):
@@ -114,8 +120,8 @@ class SearchWorker(QThread):
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            info = portal.get_mod_by_url(self._query)
-            self.result.emit(info)
+            results: List[dict] = portal.search_mods(self._query, limit=8)
+            self.result.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -194,6 +200,13 @@ class DownloaderTab(QWidget):
         self.mod_info_label.setWordWrap(True)
         self.mod_info_label.setStyleSheet("color: #b0b0b0; font-size: 12px;")
         root.addWidget(self.mod_info_label)
+
+        # Search results dropdown list (hidden until user types)
+        self.search_results_list = QListWidget()
+        self.search_results_list.setMaximumHeight(160)
+        self.search_results_list.setVisible(False)
+        self.search_results_list.itemClicked.connect(self._on_result_selected)
+        root.addWidget(self.search_results_list)
 
         # Folder row
         folder_row = QHBoxLayout()
@@ -334,18 +347,35 @@ class DownloaderTab(QWidget):
         worker.error.connect(lambda _e: None)   # silent fail
         worker.start()
 
-    def _on_search_result(self, info):
-        title = info.get("title") or info.get("name", "")
-        author = info.get("owner", "")
-        if title:
-            self.mod_info_label.setText(f"📦 {title}  by {author}")
+    @Slot(list)
+    def _on_search_result(self, results: list):
+        self.search_results_list.clear()
+        if not results:
+            self.search_results_list.setVisible(False)
+            self._active_worker = None
+            return
+        for entry in results:
+            name = entry.get("name", "")
+            title = entry.get("title") or name
+            author = entry.get("owner", "")
+            display = f"{title}  by {author}" if author else title
+            item = QListWidgetItem(display)
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self.search_results_list.addItem(item)
+        self.search_results_list.setVisible(True)
         self._active_worker = None
+
+    def _on_result_selected(self, item: QListWidgetItem):
+        mod_name = item.data(Qt.ItemDataRole.UserRole)
+        self.url_edit.setText(f"https://mods.factorio.com/mod/{mod_name}")
+        self.search_results_list.setVisible(False)
 
     def _on_load_mod(self):
         url = self.url_edit.text().strip()
         if not url:
             self._notify("Please enter a mod URL or name.", "error")
             return
+        self.search_results_list.setVisible(False)
         self.load_btn.setEnabled(False)
         worker = ResolveWorker(url, parent=self)
         self._active_worker = worker
@@ -354,7 +384,7 @@ class DownloaderTab(QWidget):
         worker.finished.connect(lambda: self.load_btn.setEnabled(True))
         worker.start()
 
-    @Slot(dict)
+    @Slot(object)
     def _on_resolved(self, info):
         title = info.get("title") or info.get("name", "")
         author = info.get("owner", "")
@@ -401,6 +431,7 @@ class DownloaderTab(QWidget):
             return
 
         # Reset UI
+        self.search_results_list.setVisible(False)
         self.download_btn.setEnabled(False)
         self.progress_bar.setValue(0)
         self.progress_bar.setProperty("completed", "false")
