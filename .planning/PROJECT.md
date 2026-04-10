@@ -13,7 +13,7 @@ Managing Factorio mods should feel fast, safe, and effortless, even for large mo
 **Goal:** Deliver a modern Fluent glassy desktop experience with stronger usability and advanced workflow tools.
 
 **Target features:**
-- Framework migration to PySide6/PyQt6 for modern UI capabilities
+- Framework migration to PySide6 for modern UI capabilities
 - Full-app Fluent glassy redesign (Downloader, Checker, Logs, shell)
 - Bulk queue manager (pause/resume/reorder/cancel)
 - Dependency graph viewer
@@ -59,7 +59,7 @@ Managing Factorio mods should feel fast, safe, and effortless, even for large mo
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Migrate UI stack from Tkinter to PySide6/PyQt6 | Tkinter cannot deliver true modern glass-style UX | — Pending |
+| Migrate UI stack from Tkinter to PySide6 | Tkinter cannot deliver true modern glass-style UX | — Pending |
 | Scope includes UX + feature additions in one milestone | User requested whole-app redesign plus workflow upgrades | — Pending |
 | Visual direction: Fluent glassy | Aligns with requested modern sleek look | — Pending |
 | No legacy Tkinter fallback in v1.0 | User requested full migration to new module only | — Pending |
