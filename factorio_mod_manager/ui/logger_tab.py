@@ -18,7 +18,22 @@ class LoggerTab:
         """
         self.frame = ttk.Frame(parent, style="Dark.TFrame")
         self.log_queue = log_queue
-        
+
+        # Toolbar with Clear button
+        toolbar = ttk.Frame(self.frame, style="Dark.TFrame")
+        toolbar.pack(side="top", fill="x", padx=5, pady=(5, 0))
+        clear_btn = tk.Button(
+            toolbar,
+            text="Clear",
+            command=self.clear_logs,
+            bg="#2d2d2d",
+            fg="#e0e0e0",
+            relief="flat",
+            padx=8,
+            pady=2,
+        )
+        clear_btn.pack(side="right")
+
         # Create text widget with scrollbar
         scrollbar = ttk.Scrollbar(self.frame)
         scrollbar.pack(side="right", fill="y")
