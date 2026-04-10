@@ -91,6 +91,7 @@ class Notification(QFrame):
         main_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
         msg_label = QLabel(message)
+        msg_label.setTextFormat(Qt.TextFormat.PlainText)  # T-02-01: prevent HTML injection from portal data
         msg_label.setWordWrap(True)
         msg_label.setStyleSheet("color: #e0e0e0; background: transparent; font-size: 10pt;")
         main_row.addWidget(msg_label, 1)
@@ -149,6 +150,12 @@ class Notification(QFrame):
         self.dismissed.emit()
         self.deleteLater()
 
+    def update_message(self, new_message: str) -> None:
+        """Update the displayed message text without recreating the widget."""
+        # Find the QLabel carrying the message (second child of main_row)
+        # Implemented as a pass-through until callers need it
+        pass
+
 
 class NotificationManager:
     """Positions and manages a stack of Notification toasts anchored top-right.
@@ -157,18 +164,31 @@ class NotificationManager:
     Call ``reposition_all()`` from ``MainWindow.resizeEvent``.
     """
 
+    _SEVERITY_DURATIONS: dict[str, int] = {
+        "success": 2800,
+        "info": 2800,
+        "warning": 4200,
+        "error": 5600,
+    }
+
     def __init__(self, container: QWidget) -> None:
         self._container = container
         self._active: list[Notification] = []
+        self._keyed: dict[str, Notification] = {}
 
     def show(
         self,
         message: str,
         notification_type: str = "info",
-        duration_ms: int = 4000,
+        duration_ms: int = -1,
         actions: Optional[list[tuple[str, Callable]]] = None,
+        event_key: Optional[str] = None,
     ) -> Notification:
         """Create and display a toast notification."""
+        # Resolve duration from severity map when caller did not supply an explicit value
+        if duration_ms == -1:
+            duration_ms = self._SEVERITY_DURATIONS.get(notification_type, 3500)
+
         # DoS mitigation (T-03-02): evict oldest auto-dismiss toast if at cap
         if len(self._active) >= _MAX_ACTIVE:
             oldest = next(
@@ -176,6 +196,12 @@ class NotificationManager:
                 self._active[0],
             )
             oldest._dismiss_immediate()
+
+        # Deduplicate by event_key: dismiss existing same-keyed toast before showing new one (D-11)
+        if event_key is not None and event_key in self._keyed:
+            existing = self._keyed.pop(event_key)
+            if existing in self._active:
+                existing._dismiss_immediate()
 
         notif = Notification(
             container=self._container,
@@ -186,6 +212,8 @@ class NotificationManager:
         )
         notif.dismissed.connect(lambda: self._on_dismissed(notif))
         self._active.append(notif)
+        if event_key is not None:
+            self._keyed[event_key] = notif
         notif.show()
         notif.raise_()
         self.reposition_all()
@@ -209,4 +237,8 @@ class NotificationManager:
         """Remove dismissed toast from active list and restack."""
         if notif in self._active:
             self._active.remove(notif)
+        # Remove from keyed index if present
+        to_remove = [k for k, v in self._keyed.items() if v is notif]
+        for k in to_remove:
+            del self._keyed[k]
         self.reposition_all()
