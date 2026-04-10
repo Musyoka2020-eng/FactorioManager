@@ -11,7 +11,6 @@ packages = [{include = "factorio_mod_manager"}]
 python = "^3.12"
 requests = "^2.32.0"
 beautifulsoup4 = "^4.12.0"
-selenium = "^4.25.0"
 pillow = "^10.1.0"
 python-dotenv = "^1.0.0"
 lxml = "^4.9.0"
