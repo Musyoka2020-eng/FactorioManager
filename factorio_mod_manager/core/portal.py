@@ -41,8 +41,6 @@ class FactorioPortalAPI:
         self.username = username
         self.token = token
         self.session = requests.Session()
-        if username and token:
-            self.session.auth = (username, token)
 
     def get_mod(self, mod_name: str) -> Optional[Dict[str, Any]]:
         """

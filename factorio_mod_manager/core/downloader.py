@@ -36,8 +36,6 @@ class ModDownloader:
         self.portal = FactorioPortalAPI(username, token)
         self.max_workers = max_workers
         self.session = requests.Session()
-        if username and token:
-            self.session.auth = (username, token)
         
         # Callback for progress updates
         self.progress_callback: Optional[Callable] = None
