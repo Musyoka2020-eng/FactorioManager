@@ -7,7 +7,7 @@ v1.0 Ui Redesign
 ## Phases
 
 - [x] **Phase 0: Pre-Migration Cleanup** - Remove dead code and known bugs from the Tkinter app; write behavioral parity checklist for Phase 1 verification.
-- [ ] **Phase 1: Qt Platform Migration and Behavior Parity** - Move all user-facing screens to a single Qt stack while preserving existing downloader, checker, and logging behavior.
+- [x] **Phase 1: Qt Platform Migration and Behavior Parity** - Move all user-facing screens to a single Qt stack while preserving existing downloader, checker, and logging behavior.
 - [ ] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
 - [ ] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
 - [ ] **Phase 4: Queue Control and Profile Workflows** - Enable robust queue execution controls and profile/preset flows with safe preview and rollback.
@@ -44,12 +44,12 @@ Plans:
 **Plans**: 6 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Foundation: PySide6 deps, dark_theme.qss, tokens.py, main.py entry point
-- [ ] 01-02-PLAN.md — QMainWindow shell and QObject StatusManager
-- [ ] 01-03-PLAN.md — Notification and NotificationManager (QFrame overlay, QGraphicsOpacityEffect fade)
-- [ ] 01-04-PLAN.md — LoggerTab (QTextEdit) and LogSignalBridge logger handler
-- [ ] 01-05-PLAN.md — DownloaderTab with DownloadWorker/ResolveWorker/SearchWorker QThreads
-- [ ] 01-06-PLAN.md — CheckerTab with ScanWorker/UpdateCheckWorker QThreads and three-column layout
+- [x] 01-01-PLAN.md — Foundation: PySide6 deps, dark_theme.qss, tokens.py, main.py entry point
+- [x] 01-02-PLAN.md — QMainWindow shell and QObject StatusManager
+- [x] 01-03-PLAN.md — Notification and NotificationManager (QFrame overlay, QGraphicsOpacityEffect fade)
+- [x] 01-04-PLAN.md — LoggerTab (QTextEdit) and LogSignalBridge logger handler
+- [x] 01-05-PLAN.md — DownloaderTab with DownloadWorker/ResolveWorker/SearchWorker QThreads
+- [x] 01-06-PLAN.md — CheckerTab with ScanWorker/UpdateCheckWorker QThreads and three-column layout
 **UI hint**: yes
 
 ### Phase 2: Fluent Shell and UX System
