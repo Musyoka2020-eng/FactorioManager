@@ -366,3 +366,116 @@ QScrollArea {{
 QScrollArea > QWidget > QWidget {{
     background-color: {BG_PRIMARY};
 }}
+
+/* -- Left Rail Navigation ---------------------------------- */
+QFrame#navRail {{
+    background-color: {BG_PANEL};
+    border-right: 1px solid {BORDER_DEFAULT};
+    min-width: {NAV_RAIL_WIDTH}px;
+    max-width: {NAV_RAIL_WIDTH}px;
+}}
+
+QPushButton#navItem {{
+    background-color: transparent;
+    color: {FG_SECONDARY};
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 10px {SPACING_LG}px;
+    text-align: left;
+    font-size: 10pt;
+    font-weight: normal;
+}}
+
+QPushButton#navItem:hover {{
+    background-color: {BTN_HOVER_BG};
+    color: {FG_PRIMARY};
+}}
+
+QPushButton#navItem:checked {{
+    background-color: {BG_PRIMARY};
+    color: {ACCENT};
+    border-left: 3px solid {ACCENT};
+    font-weight: 600;
+}}
+
+/* -- Page Header Zone -------------------------------------- */
+QWidget#pageHeader {{
+    background-color: {BG_PRIMARY};
+    min-height: {PAGE_HEADER_HEIGHT}px;
+    max-height: {PAGE_HEADER_HEIGHT}px;
+}}
+
+QLabel#pageTitle {{
+    font-size: 20pt;
+    font-weight: 600;
+    color: {FG_PRIMARY};
+    background: transparent;
+    border: none;
+}}
+
+/* -- Info Card (Downloader mod details) -------------------- */
+QFrame#infoCard {{
+    background-color: {BG_PANEL};
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 4px;
+}}
+
+QLabel#modTitle {{
+    font-size: 14pt;
+    font-weight: 600;
+    color: {FG_PRIMARY};
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modAuthor {{
+    color: {FG_SECONDARY};
+    font-size: 9pt;
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modMeta {{
+    color: {FG_DISABLED};
+    font-size: 9pt;
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modSummary {{
+    color: {FG_PRIMARY};
+    font-size: 10pt;
+    background: transparent;
+    border: none;
+}}
+
+QFrame#depDivider {{
+    background-color: {BORDER_DEFAULT};
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}}
+
+QLabel#depsHeader {{
+    font-size: 9pt;
+    font-weight: 600;
+    color: {FG_SECONDARY};
+    background: transparent;
+    border: none;
+}}
+
+/* -- Side Panel -------------------------------------------- */
+QFrame#sidePanel {{
+    background-color: {BG_PANEL};
+    border-left: 1px solid {BORDER_DEFAULT};
+    min-width: {SIDE_PANEL_WIDTH}px;
+    max-width: {SIDE_PANEL_WIDTH}px;
+}}
+
+/* -- Feedback Rail ----------------------------------------- */
+QFrame#feedbackRail {{
+    background-color: {BG_PANEL};
+    border-top: 1px solid {BORDER_DEFAULT};
+    min-height: {STATUS_BAR_HEIGHT}px;
+    max-height: {STATUS_BAR_HEIGHT}px;
+}}

@@ -63,3 +63,10 @@ LOG_DEBUG = "#b0b0b0"
 LOG_WARNING = "#ffad00"
 LOG_ERROR = "#d13438"
 LOG_SUCCESS = "#4ec952"
+
+# -- Phase 2 shell layout tokens -----------------------------
+SPACING_2XL = 48      # Section breaks (UI-SPEC.md)
+SPACING_3XL = 64      # Page-level top/bottom rhythm (UI-SPEC.md)
+NAV_RAIL_WIDTH = 200  # Left navigation rail fixed width
+SIDE_PANEL_WIDTH = 220  # Contextual side panel fixed width
+PAGE_HEADER_HEIGHT = 48  # Per-page header zone height
