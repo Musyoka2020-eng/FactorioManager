@@ -191,8 +191,9 @@ class DownloaderTab(QWidget):
         self,
         message: str,
         notif_type: str = "info",
-        duration_ms: int = 4000,
+        duration_ms: int = -1,
         actions=None,
+        event_key: str | None = None,
     ) -> None:
         if self.notification_manager is not None:
             self.notification_manager.show(
@@ -200,6 +201,7 @@ class DownloaderTab(QWidget):
                 notification_type=notif_type,
                 duration_ms=duration_ms,
                 actions=actions,
+                event_key=event_key,
             )
 
     # ------------------------------------------------------------------
@@ -343,6 +345,10 @@ class DownloaderTab(QWidget):
         self.optional_checkbox = QCheckBox("Include optional dependencies")
         s2_layout.addWidget(self.optional_checkbox)
 
+        self.confirm_btn = QPushButton("Confirm Mod →")
+        self.confirm_btn.clicked.connect(self._advance_to_stage_3)
+        s2_layout.addWidget(self.confirm_btn)
+
         left_layout.addWidget(self._stage2_widget)
 
         # Stage 3: folder + download
@@ -366,6 +372,7 @@ class DownloaderTab(QWidget):
 
         self.download_btn = QPushButton("Download Mods")
         self.download_btn.setObjectName("accentButton")
+        self.download_btn.setEnabled(False)
         self.download_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
@@ -493,6 +500,7 @@ class DownloaderTab(QWidget):
         if not stripped:
             self.search_results_list.setVisible(False)
             self.info_panel.setVisible(False)
+            self._reset_stages()
             return
         # Skip live search when the field already contains a URL
         if stripped.startswith("http") or "mods.factorio.com" in stripped:
@@ -504,6 +512,7 @@ class DownloaderTab(QWidget):
         query = self.url_edit.text().strip()
         if not query:
             return
+        self._notify("Searching mods...", event_key="search_running")
         # Show placeholder immediately so the user knows something is happening
         self.search_results_list.clear()
         placeholder = QListWidgetItem("Searching\u2026")
@@ -555,12 +564,13 @@ class DownloaderTab(QWidget):
         if not url:
             self._notify("Please enter a mod URL or name.", "error")
             return
+        self._notify("Resolving mod details...", event_key="mod_resolve")
         self.search_results_list.setVisible(False)
         self.info_panel.setVisible(False)
         self.load_btn.setEnabled(False)
         worker = ResolveWorker(url, parent=self)
         self._resolve_worker = worker
-        worker.resolved.connect(self._on_resolved)
+        worker.resolved.connect(self._advance_to_stage_2)
         worker.error.connect(self._on_resolve_error)
         worker.finished.connect(lambda: self.load_btn.setEnabled(True))
         worker.start()
@@ -620,9 +630,32 @@ class DownloaderTab(QWidget):
     def _on_resolved(self, info):
         self._populate_mod_info(info)
 
+    @Slot(object)
+    def _advance_to_stage_2(self, mod_info: object) -> None:
+        """Show mod details panel and enable download header button (Stage 2)."""
+        self._populate_mod_info(mod_info)
+        self._stage2_widget.setVisible(True)
+        self.download_btn_header.setEnabled(True)
+        # Restore folder from config so Stage 3 is ready when shown
+        self._restore_config()
+
+    def _advance_to_stage_3(self) -> None:
+        """Show download config panel (Stage 3)."""
+        self._stage3_widget.setVisible(True)
+        self.download_btn.setEnabled(True)
+
+    def _reset_stages(self) -> None:
+        """Reset staged flow back to Stage 1."""
+        self._stage2_widget.setVisible(False)
+        self._stage3_widget.setVisible(False)
+        self._progress_widget.setVisible(False)
+        self.download_btn_header.setEnabled(False)
+        self.download_btn.setEnabled(False)
+        self._clear_sidebar()
+
     @Slot(str)
     def _on_resolve_error(self, error_msg: str) -> None:
-        self._notify(f"Could not resolve mod: {error_msg}", "error")
+        self._notify(f"Could not resolve mod: {error_msg}", "error", event_key="resolve_error")
 
     # ------------------------------------------------------------------
     # Browse folder
@@ -695,6 +728,7 @@ class DownloaderTab(QWidget):
         # Reset UI
         self.search_results_list.setVisible(False)
         self.download_btn.setEnabled(False)
+        self.download_btn_header.setEnabled(False)
         self._progress_widget.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setProperty("completed", "false")
@@ -717,6 +751,10 @@ class DownloaderTab(QWidget):
         if total > 0:
             pct = int(completed / total * 100)
             self.progress_bar.setValue(pct)
+            self._notify(
+                f"Downloading: {completed}/{total} mods ({pct}%)",
+                event_key="download_progress",
+            )
             if self.status_manager:
                 self.status_manager.push_status(
                     f"Downloading: {completed}/{total} mods ({pct}%)", "info"
@@ -735,6 +773,7 @@ class DownloaderTab(QWidget):
     def _on_download_finished(self, all_succeeded, failed):
         # Always re-enable (PREP-03 fix — re-enable on error too)
         self.download_btn.setEnabled(True)
+        self.download_btn_header.setEnabled(True)
         self._active_worker = None
 
         if all_succeeded:
