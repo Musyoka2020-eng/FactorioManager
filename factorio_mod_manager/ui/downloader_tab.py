@@ -793,6 +793,8 @@ class DownloaderTab:
                     notification_type="error",
                 ),
             )
+            self.is_downloading = False
+            self.download_btn.config(state="normal")
             return
 
         # Start download in background thread
