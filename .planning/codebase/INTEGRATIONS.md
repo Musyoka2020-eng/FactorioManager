@@ -1,167 +1,141 @@
 # External Integrations
 
-**Analysis Date:** 2026-04-09
+**Analysis Date:** 2026-04-10
 
 ## APIs & External Services
 
-**Factorio Mod Portal:**
-- Service: Factorio Mod Portal (https://mods.factorio.com)
-- What it's used for:
-  - Search mods by name
-  - Fetch mod metadata (title, author, description, version)
-  - Retrieve dependency information (required, optional, incompatible)
-  - Get mod download URLs
-  - Check for mod updates
-- SDK/Client: `requests` library (2.32.0)
-- Implementation: `factorio_mod_manager/core/portal.py` - `FactorioPortalAPI` class
-- Auth: Optional HTTP Basic Auth (username/password)
-  - Credentials stored in `~/.factorio_mod_manager/config.json`
-  - Used for downloading mods when authentication required
-- API Details:
-  - Base URL: `https://mods.factorio.com`
-  - API endpoint: `https://mods.factorio.com/api/mods`
-  - Common endpoints:
-    - GET `/api/mods/{mod_name}/full` - Get complete mod info including dependencies
-    - GET `/download/{filename}` - Download mod file
-- Error Handling:
-  - Connection errors: "offline" error type
-  - Timeouts (10-second default)
-  - HTTP 404: "not_found" error type
-  - HTTP 5xx: "server_error" error type
-  - Custom `PortalAPIError` exception with error classification
+### Factorio Mod Portal — Metadata API
 
-## Data Storage
+- **Base URL:** `https://mods.factorio.com`
+- **API base:** `https://mods.factorio.com/api/mods`
+- **Implementation:** `factorio_mod_manager/core/portal.py` — `FactorioPortalAPI` class
+- **SDK/Client:** `requests.Session` (though auth on the Session is never exercised — see Authentication section)
+- **Auth required:** None — all endpoints used are public
+- **Request timeout:** 10 seconds (all `session.get(..., timeout=10)` calls)
 
-**Databases:**
-- None - No traditional database used
-- Local JSON config: `~/.factorio_mod_manager/config.json`
-  - Configuration storage only, not application data
+**Endpoints used:**
 
-**File Storage:**
-- Factorio mods folder (user-specified)
-  - Default: `C:\Users\[Username]\AppData\Roaming\Factorio\mods` (Windows)
-  - User configurable via UI
-  - Stores `.zip` files of mods
-  - Auto-detected on first run via `Config._detect_factorio_folder()`
-- Backup folder: Optional version backups in mods folder
-- Application data: `~/.factorio_mod_manager/`
-  - `config.json` - User configuration
-  - `logs/app.log` - Application log file
+| Method | URL | Purpose |
+|--------|-----|---------|
+| GET | `/api/mods/{name}/full` | Fetch complete mod info including releases, dependencies, download count |
+| GET | `/api/mods?q={query}` | Search mods by name (returns up to N results, limit applied client-side) |
+| GET | `/mod/{name}/changelog` | Scrape HTML changelog page (parsed with BeautifulSoup + `html.parser`) |
 
-**Caching:**
-- None - No persistent caching mechanism
-- In-memory caching via `ModDownloader.get_installed_mods()` during session
-- Mod metadata fetched fresh from portal each operation
+**Search behaviour:**
+- Mod search is debounced 500ms in the UI (`factorio_mod_manager/ui/downloader_tab.py` line 902: `self.parent.after(500, self._search_mod)`) before the API call fires
 
-## Authentication & Identity
-
-**Auth Provider:**
-- Factorio Portal Basic Auth
-  - Implementation: HTTP Basic Auth via `requests.Session.auth`
-  - Credentials: Username and API token pair
-  - Optional: Can be left blank for public mods
-  - Stored in: `~/.factorio_mod_manager/config.json`
-  - Config keys: `username`, `token`
-
-**No Centralized Auth:**
-- No OAuth, SAML, or third-party identity providers
-- Each user manages their own Factorio portal credentials
-- Credentials never validated locally - only used for portal API calls
-
-## Monitoring & Observability
-
-**Error Tracking:**
-- None - No external error tracking service
-- Local exception logging via Python logging module
-
-**Logs:**
-- File-based logging approach
-  - Location: `~/.factorio_mod_manager/logs/app.log`
-  - Created by: `factorio_mod_manager/utils/logger.py` - `setup_logger()`
-  - Format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
-  - Timestamp: `%Y-%m-%d %H:%M:%S`
-  - Levels: INFO (default), DEBUG, WARNING, ERROR
-- Console output for debugging
-- UI Log Viewer: `factorio_mod_manager/ui/logger_tab.py`
-  - Displays logs in real-time via Queue integration
-  - Receives logs from internal logger queue
-
-## CI/CD & Deployment
-
-**Hosting:**
-- GitHub Releases (inferred from README.md release link)
-- Distribution: Pre-built `.exe` files
-- No cloud hosting or backend server
-
-**Build Pipeline:**
-- Local build with PyInstaller for `.exe`
-- Local build with Inno Setup for Windows installer
-- No CI/CD pipeline detected (manual builds)
-
-**Deployment Method:**
-- Standalone executable: Users download `.exe` and run
-- Windows installer: Users run installer `.exe`
-- No automatic updates (manual download from releases required)
-
-## Environment Configuration
-
-**Required env vars:**
-- `.env` file support via python-dotenv
-- No hardcoded required env vars in code
-- All configuration via `config.json` or UI
-
-**Config keys stored in `~/.factorio_mod_manager/config.json`:**
-```json
-{
-  "mods_folder": "path/to/mods",     // User's Factorio mods directory
-  "username": "factorio_username",   // Factorio portal username
-  "token": "api_token_here",         // Factorio API token
-  "theme": "dark",                   // UI theme
-  "auto_backup": true,               // Backup mods before updating
-  "download_optional": false,        // Include optional dependencies
-  "auto_refresh": true,              // Auto-refresh mod list
-  "max_workers": 4                   // Concurrent download threads
-}
-```
-
-**Secrets location:**
-- `~/.factorio_mod_manager/config.json` (user home directory)
-- Credentials should be treated as secrets but stored in plain JSON
-- No encryption mechanism implemented
-
-## Webhooks & Callbacks
-
-**Incoming:**
-- None - Application is purely client-side, no server component
-
-**Outgoing:**
-- None - No webhooks or callbacks to external services
-- One-way HTTP GET/POST requests to Factorio Mod Portal only
-
-## Mod Portal Integration Details
-
-**Dependency Resolution:**
-- Recursive dependency fetching via `FactorioPortalAPI.get_mod_dependencies()`
-- Parses `info_json.dependencies` from mod releases
-- Dependency types:
-  - Required: `dep_name >= version`
-  - Optional: `(?) dep_name` or `? dep_name`
-  - Incompatible: `! dep_name`
-  - Expansions: Special handling for `space-age`, `elevated-rails` (paid DLC)
-
-**Download Process:**
-- URL construction: `{BASE_URL}/download/{filename}`
-- Concurrent downloads: Up to 4 threads (configurable via `max_workers`)
-- Streaming downloads with progress callbacks
-- ZIP file validation after download
-- Auto-extraction of mod files
-- Implements: `factorio_mod_manager/core/downloader.py` - `ModDownloader` class
-
-**Update Checking:**
-- Portal version comparison against installed versions
-- Status tracking: `ModStatus` enum (UP_TO_DATE, OUTDATED, UNKNOWN, ERROR)
-- Implements: `factorio_mod_manager/core/checker.py` - `ModChecker` class
+**Error classification** (`PortalAPIError.error_type`):
+- `"offline"` — `ConnectionError` (DNS/network failure)
+- `"timeout"` — `requests.Timeout`
+- `"not_found"` — HTTP 404
+- `"server_error"` — HTTP 500/502/503/504
+- `"unknown"` — any other exception
 
 ---
 
-*Integration audit: 2026-04-09*
+### re146.dev Mod Mirror — File Downloads
+
+- **Base URL:** `https://mods-storage.re146.dev`
+- **URL pattern:** `https://mods-storage.re146.dev/{mod_name}/{version}.zip`
+- **Implementation:** `factorio_mod_manager/core/downloader.py` — `_download_with_re146()`
+- **Auth required:** None — public mirror, no credentials
+- **HTTP client:** Plain `requests.get(mirror_url, timeout=60, stream=True)` — does **not** use the `FactorioPortalAPI` session
+- **Download timeout:** 60 seconds
+- **Concurrency:** Up to `max_workers` parallel downloads (default 4) via `ThreadPoolExecutor`
+
+**Download flow:**
+1. Construct URL: `https://mods-storage.re146.dev/{name}/{version}.zip`
+2. Streaming GET with 8192-byte chunks; logs progress for large files
+3. Write chunks to `{mods_folder}/{name}_{version}.zip`
+4. Validate downloaded file is a valid ZIP (`zipfile.ZipFile.testzip()`)
+5. Delete file on validation failure
+
+**Note:** `get_mod_download_url()` in `portal.py` constructs a `https://mods.factorio.com/download/...` URL from portal metadata, but this method is **never called** by the download pipeline. All actual downloads go through `_download_with_re146()` using the re146.dev mirror.
+
+---
+
+## Data Storage
+
+**Config file:**
+- Path: `~/.factorio_mod_manager/config.json`
+- Managed by: `factorio_mod_manager/utils/config.py` — `Config` class
+- Created on first run with defaults if absent
+- Read on startup; written on every `Config.set()` call
+
+**Config keys:**
+```json
+{
+  "mods_folder":        "path/to/Factorio/mods",
+  "username":           null,
+  "token":              null,
+  "theme":              "dark",
+  "auto_backup":        true,
+  "download_optional":  false,
+  "auto_refresh":       true,
+  "max_workers":        4
+}
+```
+
+**Mod files:**
+- Stored as `.zip` files in the user-configured mods folder
+- Default locations auto-detected by `Config._detect_factorio_folder()`:
+  - Windows: `%APPDATA%\Factorio\mods`
+  - Linux: `~/.factorio/mods`
+  - macOS: `~/Library/Application Support/factorio/mods`
+- Mod metadata read from `info.json` inside each `.zip` via `factorio_mod_manager/utils/helpers.py` — `parse_mod_info()`
+
+**Caching:**
+- None — portal metadata is fetched fresh on every scan/check
+
+---
+
+## Authentication & Identity
+
+**IMPORTANT — credentials are dead code:**
+
+`username` and `token` are stored in `config.json` and accepted as constructor arguments by both `FactorioPortalAPI` and `ModDownloader`. When both are present, `self.session.auth = (username, token)` is set on the `requests.Session`. However:
+
+1. The Session is only used for portal metadata calls (`/api/mods/...`) — which are **public endpoints requiring no auth**.
+2. All actual mod downloads bypass the Session entirely and use plain `requests.get()` against the re146.dev mirror — also a **public endpoint requiring no auth**.
+3. `get_mod_download_url()` (which constructs a credentialled `mods.factorio.com/download/...` URL) is **never invoked** in the download pipeline.
+
+**Result:** No authenticated request is ever made. `username` and `token` in `config.json` have no functional effect on any operation the application currently performs.
+
+---
+
+## Monitoring & Observability
+
+**Error tracking:**
+- None — no external service (Sentry, Datadog, etc.)
+- Exceptions are caught, classified, and surfaced to the UI via callback strings
+
+**Logs:**
+- UI log viewer: `factorio_mod_manager/ui/logger_tab.py`
+  - Polls a Queue every 100ms (`self.frame.after(100, self._poll_logs)`) to display log messages in real time
+- Application logger: `factorio_mod_manager/utils/logger.py`
+- Log file location: `~/.factorio_mod_manager/logs/app.log`
+
+---
+
+## CI/CD & Deployment
+
+**Hosting:** No cloud backend. The application is a standalone desktop client.
+
+**Build pipeline (manual, local):**
+1. PyInstaller bundles `factorio_mod_manager/main.py` → `FactorioModManager.exe` using `FactorioModManager.spec`
+2. Inno Setup packages the executable into a Windows installer using `FactorioModManager.iss`
+3. Distribution: GitHub Releases (manual upload)
+
+**No CI/CD pipeline detected.**
+
+---
+
+## Webhooks & Callbacks
+
+**Incoming:** None — no server component.
+
+**Outgoing:** None — all HTTP calls are outbound GET requests initiated by user action.
+
+---
+
+*Integration audit: 2026-04-10*

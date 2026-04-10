@@ -1,131 +1,98 @@
 # Technology Stack
 
-**Analysis Date:** 2026-04-09
+**Analysis Date:** 2026-04-10
 
 ## Languages
 
 **Primary:**
-- Python 3.12+ - All application code, UI, and core logic
+- Python 3.12+ — all application code under `factorio_mod_manager/`
 
 ## Runtime
 
 **Environment:**
-- Python 3.12+ (specified in `pyproject.toml`)
+- CPython 3.12 (minimum, per `pyproject.toml` constraint `^3.12`)
 
 **Package Manager:**
-- Poetry - Dependency management and packaging
-- Lockfile: Implicit (Poetry uses poetry.lock)
+- Poetry (`pyproject.toml`)
+- Pip-compatible pinned lockfile: `requirements.txt` (used for PyInstaller builds)
 
 ## Frameworks
 
 **GUI:**
-- Tkinter - Built-in Python GUI framework (standard library)
-  - Used for entire desktop UI in `factorio_mod_manager/ui/`
-  - Custom dark theme with styled components
-  - Multi-threaded UI updates via Queue integration
+- `tkinter` (stdlib) — entire desktop UI in `factorio_mod_manager/ui/`; no third-party GUI framework
+- `ttk` (stdlib themed widgets) — used throughout tabs and widgets
 
-**HTTP/Web:**
-- Requests 2.32.0 - HTTP client for API calls
-  - Used in `factorio_mod_manager/core/portal.py` for Factorio Mod Portal API
-  - Used in `factorio_mod_manager/core/downloader.py` for mod downloads
-  - Session-based with optional HTTP Basic Auth
+**HTTP Client:**
+- `requests ^2.32.0` — API calls (`portal.py`) and direct file downloads (`downloader.py`)
+  - `requests.Session` used for portal API calls (auth stub attached but never invoked — see INTEGRATIONS.md)
+  - Plain `requests.get()` used for actual mod downloads in `_download_with_re146()`; bypasses Session entirely
 
 **HTML Parsing:**
-- BeautifulSoup4 4.12.0 - HTML/XML parsing
-  - Used in `factorio_mod_manager/core/portal.py` for parsing mod portal responses
-  - Integrated with lxml for performance
-
-**Image Processing:**
-- Pillow 10.1.0 - Image manipulation
-  - Used for icon handling and image processing in UI
-
-**Configuration:**
-- python-dotenv 1.0.0 - Environment variable management
-  - Loads `.env` files for configuration
-
-**XML Processing:**
-- lxml 4.9.0 - Fast XML/HTML parsing library
-  - Backend for BeautifulSoup4
+- `beautifulsoup4 ^4.12.0` — parses mod changelog HTML at `https://mods.factorio.com/mod/{name}/changelog`
+  - Parser backend: Python stdlib `html.parser` (NOT lxml; `BeautifulSoup(response.text, 'html.parser')`)
+  - Used only in `factorio_mod_manager/core/portal.py` — `get_mod_changelog()`
 
 ## Testing
 
-**Framework:**
-- pytest 7.4.0 - Test runner and framework
+**Runner:**
+- `pytest ^7.4.0` (dev dependency)
+- No test files detected in the current workspace
 
 ## Code Quality
 
-**Formatting:**
-- black 23.12.0 - Code formatter
+**Formatter:**
+- `black ^23.12.0` (dev dependency)
 
-**Linting:**
-- ruff 0.1.0 - Fast Python linter
+**Linter:**
+- `ruff ^0.1.0` (dev dependency)
 
 ## Build & Packaging
 
-**Windows Executable:**
-- PyInstaller - Compiles Python to executable
-  - Config: `FactorioModManager.spec`
-  - Output: Standalone `.exe` file in `build/` directory
-  - See artifacts: `build/FactorioModManager/`
+**Executable bundling:**
+- PyInstaller — spec file at `FactorioModManager.spec`; build artefacts under `build/FactorioModManager/`
+- Entry point: `factorio_mod_manager/main.py` → `main()`
 
-**Windows Installer:**
-- Inno Setup - Windows installation wizard
-  - Script: `FactorioModManager.iss`
-  - Creates `.exe` installer for deployment
+**Windows installer:**
+- Inno Setup — script at `FactorioModManager.iss`
 
 ## Key Dependencies
 
-**Critical:**
-- requests 2.32.0 - Essential for Factorio Portal API communication
-- beautifulsoup4 4.12.0 - Essential for parsing mod metadata
-- tkinter - Essential for GUI (built-in library)
+**Critical (actively used):**
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `requests` | ^2.32.0 | Portal API queries + streaming mod file downloads |
+| `beautifulsoup4` | ^4.12.0 | Changelog HTML scraping (`portal.py`) |
 
-**Important:**
-- pillow 10.1.0 - Image handling for UI
-- lxml 4.9.0 - Performance optimization for parsing
-- python-dotenv 1.0.0 - Configuration management
-
-**Unused:**
-- selenium 4.25.0 - Listed in `pyproject.toml` but not used in codebase (likely for future web scraping capability)
+**Declared but unused — safe to remove:**
+| Package | Version | Notes |
+|---------|---------|-------|
+| `pillow` | ^10.1.0 | Never imported anywhere in `factorio_mod_manager/` |
+| `python-dotenv` | ^1.0.0 | Never imported; no `.env` file loading in codebase |
+| `lxml` | ^4.9.0 | Never imported; BeautifulSoup explicitly uses `html.parser`, not lxml |
+| `selenium` | ^4.25.0 | Listed in `pyproject.toml` only (absent from `requirements.txt`); never imported |
 
 ## Configuration
 
-**Environment:**
-- .env file support via python-dotenv
-- JSON-based config file: `~/.factorio_mod_manager/config.json`
-  - Manages mods folder path, credentials, UI theme, download settings
-  - Auto-generates on first run with defaults
+**Runtime config:**
+- JSON file: `~/.factorio_mod_manager/config.json` — managed by `factorio_mod_manager/utils/config.py`
+- Keys: `mods_folder`, `username`, `token`, `theme`, `auto_backup`, `download_optional`, `auto_refresh`, `max_workers`
+- No `.env` file support despite `python-dotenv` being listed as a dependency
 
 **Build:**
-- `pyproject.toml` - Poetry configuration with all dependencies
-- `FactorioModManager.spec` - PyInstaller specification for executable
-- `FactorioModManager.iss` - Inno Setup installer configuration
+- `pyproject.toml` — Poetry project and dependency declaration
+- `FactorioModManager.spec` — PyInstaller bundling specification
+- `FactorioModManager.iss` — Inno Setup Windows installer script
 
 ## Platform Requirements
 
 **Development:**
 - Python 3.12 or later
-- Windows 7+ for testing (DPI awareness code specific to Windows)
-- Linux/macOS supported (cross-platform Tkinter support)
+- Windows / Linux / macOS (tkinter is cross-platform)
 
 **Production:**
-- Windows 7+ for distributed .exe
-  - DPI awareness enabled for crisp rendering on high-resolution displays
-- Python installation for source distribution
-- Read/write access to Factorio mods folder
-
-## Deployment
-
-**Distribution Methods:**
-1. Pre-compiled executable: `FactorioModManager.exe` (PyInstaller)
-2. Windows installer: Via Inno Setup `.iss` script
-3. Source distribution: Poetry package installation
-
-**Logging:**
-- File-based logs: `~/.factorio_mod_manager/logs/app.log`
-- Console output during runtime
-- UI log viewer tab with queue-based integration
+- Windows — primary target; packaged as standalone `.exe` via PyInstaller + Inno Setup
+- Linux/macOS — supported via source install; no packaged distribution provided
 
 ---
 
-*Stack analysis: 2026-04-09*
+*Stack analysis: 2026-04-10*
