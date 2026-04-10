@@ -1,0 +1,368 @@
+/* ============================================================
+   Factorio Mod Manager — Dark Theme QSS
+   Parameterized: {{TOKEN_NAME}} → tokens.py values
+   All widget styling goes here. Never use inline setStyleSheet().
+   Named selectors used for Phase 2 Fluent override path.
+   ============================================================ */
+
+/* ── Base ─────────────────────────────────────────────────── */
+QMainWindow,
+QWidget {{
+    background-color: {BG_PRIMARY};
+    color: {FG_PRIMARY};
+    font-family: "Segoe UI";
+    font-size: 10pt;
+}}
+
+QDialog {{
+    background-color: {BG_PRIMARY};
+    color: {FG_PRIMARY};
+}}
+
+/* ── Tab Widget ───────────────────────────────────────────── */
+QTabWidget::pane {{
+    border: none;
+    background-color: {BG_PRIMARY};
+}}
+
+QTabBar::tab {{
+    background-color: {BG_PANEL};
+    color: {FG_SECONDARY};
+    padding: {SPACING_SM}px {SPACING_LG}px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-width: 120px;
+}}
+
+QTabBar::tab:selected {{
+    background-color: {BG_PRIMARY};
+    color: {FG_PRIMARY};
+    border-bottom: 2px solid {ACCENT};
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: {BTN_HOVER_BG};
+    color: {FG_PRIMARY};
+}}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+QPushButton {{
+    background-color: {BG_PANEL};
+    color: {FG_PRIMARY};
+    border: 1px solid {BORDER_DEFAULT};
+    padding: 5px {SPACING_MD}px;
+    border-radius: 3px;
+}}
+
+QPushButton:hover {{
+    background-color: {BTN_HOVER_BG};
+    border: 1px solid {BORDER_HOVER};
+}}
+
+QPushButton:pressed {{
+    background-color: {BTN_PRESSED_BG};
+    border: 1px solid {BORDER_HOVER};
+}}
+
+QPushButton:disabled {{
+    background-color: #111111;
+    color: {FG_DISABLED};
+    border: 1px solid {BORDER_READONLY};
+}}
+
+QPushButton#accentButton {{
+    background-color: {ACCENT};
+    color: #ffffff;
+    border: none;
+    font-weight: bold;
+    padding: 6px {SPACING_LG}px;
+}}
+
+QPushButton#accentButton:hover {{
+    background-color: {ACCENT_HOVER};
+}}
+
+QPushButton#accentButton:pressed {{
+    background-color: {ACCENT_PRESSED};
+}}
+
+QPushButton#accentButton:disabled {{
+    background-color: {ACCENT_DISABLED_BG};
+    color: {FG_DISABLED};
+}}
+
+QPushButton#destructiveButton {{
+    background-color: {BTN_DESTR_BG};
+    color: {ERROR};
+    border: 1px solid {BTN_DESTR_BG};
+}}
+
+QPushButton#destructiveButton:hover {{
+    background-color: {BTN_DESTR_HOVER_BG};
+}}
+
+QPushButton#destructiveButton:pressed {{
+    background-color: {BTN_DESTR_PRESSED_BG};
+}}
+
+/* ── Line Edits ───────────────────────────────────────────── */
+QLineEdit {{
+    background-color: {BG_INPUT};
+    color: {FG_PRIMARY};
+    border: 1px solid {BORDER_DEFAULT};
+    padding: 4px {SPACING_SM}px;
+    border-radius: 3px;
+    selection-background-color: {ACCENT};
+}}
+
+QLineEdit:focus {{
+    border: 1px solid {BORDER_FOCUS};
+}}
+
+QLineEdit:read-only {{
+    background-color: {BG_INPUT_READONLY};
+    color: {FG_SECONDARY};
+    border: 1px solid {BORDER_READONLY};
+}}
+
+QLineEdit::placeholder {{
+    color: {FG_SECONDARY};
+}}
+
+/* ── Text Edit (log / progress console) ──────────────────── */
+QTextEdit {{
+    background-color: {BG_PANEL};
+    color: {FG_PRIMARY};
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 3px;
+    padding: {SPACING_XS}px;
+    selection-background-color: {ACCENT};
+}}
+
+QTextEdit:focus {{
+    border: 1px solid {BORDER_FOCUS};
+}}
+
+/* ── Progress Bar ─────────────────────────────────────────── */
+QProgressBar {{
+    background-color: {BG_PANEL};
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 3px;
+    text-align: center;
+    color: {FG_PRIMARY};
+    height: 18px;
+}}
+
+QProgressBar::chunk {{
+    background-color: {ACCENT};
+    border-radius: 2px;
+}}
+
+QProgressBar[completed="true"]::chunk {{
+    background-color: {SUCCESS};
+}}
+
+QProgressBar[error="true"]::chunk {{
+    background-color: {ERROR};
+}}
+
+/* ── Table Widget ─────────────────────────────────────────── */
+QTableWidget {{
+    background-color: {BG_PRIMARY};
+    color: {FG_PRIMARY};
+    gridline-color: {BORDER_DEFAULT};
+    border: 1px solid {BORDER_DEFAULT};
+    selection-background-color: {TABLE_SELECTED_BG};
+    selection-color: {FG_PRIMARY};
+    alternate-background-color: {BG_ROW_ALT};
+}}
+
+QTableWidget::item {{
+    padding: {SPACING_XS}px {SPACING_SM}px;
+    border: none;
+}}
+
+QTableWidget::item:selected {{
+    background-color: {TABLE_SELECTED_BG};
+    color: {FG_PRIMARY};
+}}
+
+QHeaderView::section {{
+    background-color: {TABLE_HEADER_BG};
+    color: {FG_SECONDARY};
+    padding: {SPACING_XS}px {SPACING_SM}px;
+    border: none;
+    border-bottom: 1px solid {BORDER_DEFAULT};
+    font-weight: normal;
+}}
+
+QHeaderView::section:hover {{
+    background-color: {BTN_HOVER_BG};
+}}
+
+/* ── Check Box ────────────────────────────────────────────── */
+QCheckBox {{
+    color: {FG_PRIMARY};
+    spacing: {SPACING_XS}px;
+}}
+
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 2px;
+    background-color: {BG_PANEL};
+}}
+
+QCheckBox::indicator:checked {{
+    background-color: {ACCENT};
+    border: 1px solid {ACCENT};
+}}
+
+QCheckBox::indicator:hover {{
+    border: 1px solid {BORDER_HOVER};
+}}
+
+/* ── Radio Button ─────────────────────────────────────────── */
+QRadioButton {{
+    color: {FG_PRIMARY};
+    spacing: {SPACING_XS}px;
+}}
+
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 7px;
+    background-color: {BG_PANEL};
+}}
+
+QRadioButton::indicator:checked {{
+    background-color: {ACCENT};
+    border: 1px solid {ACCENT};
+}}
+
+/* ── Frame ────────────────────────────────────────────────── */
+QFrame {{
+    background-color: {BG_PANEL};
+    border: none;
+}}
+
+QFrame#headerSeparator {{
+    background-color: {ACCENT};
+    max-height: 1px;
+    min-height: 1px;
+    border: none;
+}}
+
+/* ── Group Box ────────────────────────────────────────────── */
+QGroupBox {{
+    background-color: {BG_PANEL};
+    border: 1px solid {BORDER_DEFAULT};
+    border-radius: 4px;
+    margin-top: 16px;
+    padding: {SPACING_SM}px;
+    color: {FG_SECONDARY};
+    font-size: 9pt;
+}}
+
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 {SPACING_XS}px;
+    color: {FG_SECONDARY};
+}}
+
+/* ── Splitter ─────────────────────────────────────────────── */
+QSplitter::handle {{
+    background-color: {BORDER_DEFAULT};
+    width: 1px;
+}}
+
+/* ── Scroll Bar ───────────────────────────────────────────── */
+QScrollBar:vertical {{
+    background-color: {BG_PANEL};
+    width: 10px;
+    border: none;
+}}
+
+QScrollBar::handle:vertical {{
+    background-color: {BORDER_DEFAULT};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+
+QScrollBar::handle:vertical:hover {{
+    background-color: {FG_SECONDARY};
+}}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+QScrollBar:horizontal {{
+    background-color: {BG_PANEL};
+    height: 10px;
+    border: none;
+}}
+
+QScrollBar::handle:horizontal {{
+    background-color: {BORDER_DEFAULT};
+    border-radius: 4px;
+    min-width: 20px;
+}}
+
+QScrollBar::handle:horizontal:hover {{
+    background-color: {FG_SECONDARY};
+}}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {{
+    width: 0px;
+}}
+
+/* ── Status Bar ───────────────────────────────────────────── */
+QStatusBar {{
+    background-color: {BG_PANEL};
+    color: {FG_SECONDARY};
+    border-top: 1px solid {BORDER_DEFAULT};
+    font-size: 9pt;
+    min-height: {STATUS_BAR_HEIGHT}px;
+    max-height: {STATUS_BAR_HEIGHT}px;
+}}
+
+/* ── Notification Frames (dynamic property selectors) ─────── */
+QFrame[notifType="success"] {{
+    background-color: {NOTIF_BG_SUCCESS};
+    border: 1px solid {SUCCESS};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="error"] {{
+    background-color: {NOTIF_BG_ERROR};
+    border: 1px solid {ERROR};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="warning"] {{
+    background-color: {NOTIF_BG_WARNING};
+    border: 1px solid {WARNING};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="info"] {{
+    background-color: {NOTIF_BG_INFO};
+    border: 1px solid {ACCENT};
+    border-radius: 4px;
+}}
+
+/* ── Scroll Area ──────────────────────────────────────────── */
+QScrollArea {{
+    border: none;
+    background-color: transparent;
+}}
+
+QScrollArea > QWidget > QWidget {{
+    background-color: {BG_PRIMARY};
+}}
