@@ -176,8 +176,30 @@ class CheckerTab(QWidget):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 0, 16, 0)
+
+        page_title = QLabel("Checker & Updates")
+        page_title.setObjectName("pageTitle")
+        header_layout.addWidget(page_title)
+        header_layout.addStretch()
+
+        self._header_check_btn = QPushButton("Check for Updates")
+        self._header_check_btn.setObjectName("accentButton")
+        self._header_check_btn.clicked.connect(self._on_check_updates)
+        header_layout.addWidget(self._header_check_btn)
+        root.addWidget(header)
+
+        workspace = QWidget()
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(8, 8, 8, 8)
+        workspace_layout.setSpacing(8)
+        root.addWidget(workspace, stretch=1)
 
         # Main splitter: left | center | right
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -202,7 +224,8 @@ class CheckerTab(QWidget):
 
         # Status label
         self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("color: #4ec952; font-size: 11px;")
+        self.status_label.setObjectName("checkerStatusLabel")
+        self.status_label.setProperty("statusType", "ready")
         left_layout.addWidget(self.status_label)
 
         # Button stack
@@ -272,7 +295,6 @@ class CheckerTab(QWidget):
             self.stat_total, self.stat_uptodate, self.stat_outdated,
             self.stat_unknown, self.stat_downloads,
         ):
-            lbl.setStyleSheet("font-size: 11px;")
             stats_vbox.addWidget(lbl)
         right_layout.addWidget(stats_group)
 
@@ -317,7 +339,7 @@ class CheckerTab(QWidget):
         splitter.addWidget(self.mod_table)
         splitter.addWidget(right_widget)
         splitter.setStretchFactor(1, 1)
-        root.addWidget(splitter, stretch=1)
+        workspace_layout.addWidget(splitter, stretch=1)
 
         # Operation log
         self.op_log = QTextEdit()
@@ -325,10 +347,15 @@ class CheckerTab(QWidget):
         self.op_log.setFixedHeight(120)
         self.op_log.setFont(QFont("Cascadia Code", 9))
         self.op_log.setPlaceholderText("Operation log…")
-        root.addWidget(self.op_log)
+        workspace_layout.addWidget(self.op_log)
 
         # Initial button state
         self._update_button_states()
+
+    def _set_status_type(self, status_type: str):
+        self.status_label.setProperty("statusType", status_type)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def _restore_config(self):
         saved = config.get("mods_folder", "")
@@ -507,12 +534,19 @@ class CheckerTab(QWidget):
 
     def _set_busy(self, label: str):
         self.status_label.setText(label)
-        self.status_label.setStyleSheet("color: #0078d4; font-size: 11px;")
+        self._set_status_type("busy")
         self.scan_btn.setEnabled(False)
 
     def _set_idle(self, label: str = "Ready", color: str = "#4ec952"):
         self.status_label.setText(label)
-        self.status_label.setStyleSheet(f"color: {color}; font-size: 11px;")
+        if color == "#d13438":
+            self._set_status_type("error")
+        elif color == "#ffad00":
+            self._set_status_type("warning")
+        elif color == "#4ec952":
+            self._set_status_type("ready")
+        else:
+            self._set_status_type("neutral")
         self.scan_btn.setEnabled(True)
         self._active_worker = None
         self._update_button_states()

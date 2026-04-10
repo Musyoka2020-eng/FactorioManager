@@ -479,3 +479,28 @@ QFrame#feedbackRail {{
     min-height: {STATUS_BAR_HEIGHT}px;
     max-height: {STATUS_BAR_HEIGHT}px;
 }}
+
+QLabel#checkerStatusLabel[statusType="ready"] {{
+    color: {SUCCESS};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="busy"] {{
+    color: {ACCENT};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="warning"] {{
+    color: {WARNING};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="error"] {{
+    color: {ERROR};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="neutral"] {{
+    color: {FG_SECONDARY};
+    font-size: 11px;
+}}
