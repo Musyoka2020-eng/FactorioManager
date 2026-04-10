@@ -121,22 +121,24 @@ class SearchWorker(QThread):
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            # Fetch 25 so client-side ranking has enough candidates
-            raw: List[dict] = portal.search_mods(self._query, limit=25)
+            # Request 50 candidates; portal will page_size=50 let us rank properly
+            raw: List[dict] = portal.search_mods(self._query, limit=50)
             q = self._query.lower()
 
             def _rank(entry):
                 name  = (entry.get("name")  or "").lower()
                 title = (entry.get("title") or "").lower()
-                if name == q or title == q:   return 0  # exact
-                if name.startswith(q):        return 1  # name prefix
-                if title.startswith(q):       return 2  # title prefix
-                if q in name:                 return 3  # name contains
-                if q in title:                return 4  # title contains
-                return 5
+                if name == q or title == q:        return 0  # exact
+                if name.startswith(q):             return 1  # name prefix
+                if title.startswith(q):            return 2  # title prefix
+                if q in name:                      return 3  # name contains
+                if q in title:                     return 4  # title contains
+                return 5                                     # no match
 
             raw.sort(key=_rank)
-            self.result.emit(raw[:8])
+            # Drop completely unrelated entries; fall back if nothing matched
+            relevant = [e for e in raw if _rank(e) < 5]
+            self.result.emit((relevant if relevant else raw)[:8])
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -248,14 +250,14 @@ class DownloaderTab(QWidget):
         self.info_summary_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         info_vbox.addWidget(self.info_summary_lbl)
 
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("background: #3a3f47; border: none; max-height: 1px; margin-top: 4px;")
-        info_vbox.addWidget(divider)
+        self._dep_divider = QFrame()
+        self._dep_divider.setFrameShape(QFrame.Shape.HLine)
+        self._dep_divider.setStyleSheet("background: #3a3f47; border: none; max-height: 1px; margin-top: 4px;")
+        info_vbox.addWidget(self._dep_divider)
 
-        deps_hdr = QLabel("Dependencies")
-        deps_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #9aaab4; background: transparent; border: none; margin-top: 2px;")
-        info_vbox.addWidget(deps_hdr)
+        self.deps_hdr = QLabel("Dependencies")
+        self.deps_hdr.setStyleSheet("font-size: 11px; font-weight: bold; color: #9aaab4; background: transparent; border: none; margin-top: 2px;")
+        info_vbox.addWidget(self.deps_hdr)
 
         self.deps_required_lbl = QLabel("")
         self.deps_optional_lbl = QLabel("")
@@ -336,6 +338,9 @@ class DownloaderTab(QWidget):
         self._sidebar_layout.addStretch()
         self._sidebar_scroll.setWidget(self._sidebar_inner)
         progress_row.addWidget(self._sidebar_scroll)
+
+        self.progress_bar.setVisible(False)
+        self._sidebar_scroll.setVisible(False)
 
         root.addLayout(progress_row, stretch=1)
 
@@ -441,7 +446,7 @@ class DownloaderTab(QWidget):
             title   = entry.get("title") or name
             author  = entry.get("owner", "")
             dl      = entry.get("downloads_count", 0)
-            display = f"{title}  ({name})"
+            display = title if name.lower() in title.lower() else f"{title}  ({name})"
             if author:
                 display += f"  by {author}"
             if dl:
@@ -521,6 +526,10 @@ class DownloaderTab(QWidget):
             else:
                 lbl.setVisible(False)
 
+        any_deps = bool(req or opt or base or incompat)
+        self.deps_hdr.setVisible(any_deps)
+        self._dep_divider.setVisible(any_deps)
+
         self.info_panel.setVisible(True)
         self._resolve_worker = None
 
@@ -599,6 +608,8 @@ class DownloaderTab(QWidget):
         # Reset UI
         self.search_results_list.setVisible(False)
         self.download_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self._sidebar_scroll.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setProperty("completed", "false")
         self.progress_bar.style().unpolish(self.progress_bar)

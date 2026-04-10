@@ -264,7 +264,7 @@ class FactorioPortalAPI:
         try:
             response = self.session.get(
                 f"{self.API_URL}",
-                params={"q": query},
+                params={"q": query, "page_size": max(limit, 50)},
                 timeout=10
             )
             if response.status_code == 200:
