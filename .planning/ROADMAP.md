@@ -6,7 +6,7 @@ v1.0 Ui Redesign
 
 ## Phases
 
-- [ ] **Phase 0: Pre-Migration Cleanup** - Remove dead code and known bugs from the Tkinter app; write behavioral parity checklist for Phase 1 verification.
+- [x] **Phase 0: Pre-Migration Cleanup** - Remove dead code and known bugs from the Tkinter app; write behavioral parity checklist for Phase 1 verification.
 - [ ] **Phase 1: Qt Platform Migration and Behavior Parity** - Move all user-facing screens to a single Qt stack while preserving existing downloader, checker, and logging behavior.
 - [ ] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
 - [ ] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
@@ -28,9 +28,9 @@ v1.0 Ui Redesign
 5. A behavioral parity checklist file exists in `.planning/` documenting all Tkinter-specific behaviors (debounce timing, auto-scroll, threading patterns, notification types, status bar behavior) that the Qt migration must replicate.
 **Plans**: 3 plans
 Plans:
-- [ ] 00-01-PLAN.md — Remove selenium dep and dead credential auth session from core
-- [ ] 00-02-PLAN.md — Fix download button disabled bug; wire Clear log button
-- [ ] 00-03-PLAN.md — Write behavioral parity checklist for Phase 1 verification
+- [x] 00-01-PLAN.md — Remove selenium dep and dead credential auth session from core
+- [x] 00-02-PLAN.md — Fix download button disabled bug; wire Clear log button
+- [x] 00-03-PLAN.md — Write behavioral parity checklist for Phase 1 verification
 **UI hint**: no
 
 ### Phase 1: Qt Platform Migration and Behavior Parity
