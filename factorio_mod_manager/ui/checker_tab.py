@@ -740,15 +740,16 @@ class CheckerTab(QWidget):
         self._update_guidance_panel()
 
     def _on_enabled_changed(self, mod_name: str, state: int) -> None:
-        """Toggle mod enabled state in mod-list.json without deleting the ZIP."""
-        if not self._logic:
-            return
+        """Track mod enabled state in app config only — never touches Factorio's mod-list.json."""
         enabled = state == Qt.CheckState.Checked.value
-        if enabled:
-            self._logic.enable_mod(mod_name)
-        else:
-            self._logic.disable_mod(mod_name)
-        # Update dim treatment for this row
+        # Update in-memory mod object
+        if mod_name in self._mods:
+            self._mods[mod_name].enabled = enabled
+        # Persist into app config (not mod-list.json)
+        overrides: dict = config.get("mod_enabled_overrides", {}) or {}
+        overrides[mod_name] = enabled
+        config.set("mod_enabled_overrides", overrides)
+        # Update row dim treatment
         dim = QColor("#888888")
         normal = QColor()  # default foreground
         for row in range(self.mod_table.rowCount()):
@@ -820,6 +821,11 @@ class CheckerTab(QWidget):
 
     @Slot(object)
     def _on_mods_loaded(self, mods: dict):
+        # Apply any enabled-state overrides saved in app config (never from mod-list.json)
+        overrides: dict = config.get("mod_enabled_overrides", {}) or {}
+        for name, mod in mods.items():
+            if name in overrides:
+                mod.enabled = overrides[name]
         self._mods = mods
         self.mods_loaded.emit(mods)
         self._populate_table(mods)
