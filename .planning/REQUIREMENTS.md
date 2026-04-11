@@ -9,17 +9,17 @@ Requirements for the v1.0 UI Redesign milestone. Each maps to roadmap phases.
 
 ### Pre-Migration Preparation (Phase 0)
 
-- [ ] **PREP-01**: Dead `selenium` dependency is removed from `pyproject.toml`
-- [ ] **PREP-02**: Dead credential auth session setup is removed from `ModDownloader` and `FactorioPortalAPI`
-- [ ] **PREP-03**: Download button re-enables correctly when the offline check fails, without requiring app restart
-- [ ] **PREP-04**: Clear Log button is wired to the Logs tab and clears the log display
-- [ ] **PREP-05**: A behavioral parity checklist documents all Tkinter-specific behaviors required of the Qt migration
+- [x] **PREP-01**: Dead `selenium` dependency is removed from `pyproject.toml`
+- [x] **PREP-02**: Dead credential auth session setup is removed from `ModDownloader` and `FactorioPortalAPI`
+- [x] **PREP-03**: Download button re-enables correctly when the offline check fails, without requiring app restart
+- [x] **PREP-04**: Clear Log button is wired to the Logs tab and clears the log display
+- [x] **PREP-05**: A behavioral parity checklist documents all Tkinter-specific behaviors required of the Qt migration
 
 ### Platform Migration (Phase 1)
 
-- [ ] **PLAT-01**: User can launch and use all primary app screens through one Qt UI path only
-- [ ] **PLAT-02**: No legacy Tkinter production screen path is accessible to the user
-- [ ] **PLAT-03**: User can complete download, update check, and log viewing with behavior equivalent to the pre-migration app (verified against PREP-05 checklist)
+- [x] **PLAT-01**: User can launch and use all primary app screens through one Qt UI path only
+- [x] **PLAT-02**: No legacy Tkinter production screen path is accessible to the user
+- [x] **PLAT-03**: User can complete download, update check, and log viewing with behavior equivalent to the pre-migration app (verified against PREP-05 checklist)
 
 ### User Interface and Experience (Phase 2)
 
@@ -29,9 +29,9 @@ Requirements for the v1.0 UI Redesign milestone. Each maps to roadmap phases.
 
 ### Search and Filtering (Phase 3)
 
-- [ ] **SRCH-01**: User can run one unified search across installed, downloadable, and queued mods
-- [ ] **SRCH-02**: User can filter and sort mod lists by status and priority without leaving their current workflow context
-- [ ] **SRCH-03**: User can browse and search the Factorio portal by keyword or category from within the app
+- [x] **SRCH-01**: User can run one unified search across installed, downloadable, and queued mods
+- [x] **SRCH-02**: User can filter and sort mod lists by status and priority without leaving their current workflow context
+- [x] **SRCH-03**: User can browse and search the Factorio portal by keyword or category from within the app
 
 ### Settings and Configuration (Phase 3)
 
@@ -85,30 +85,30 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PREP-01 | Phase 0 | Pending |
-| PREP-02 | Phase 0 | Pending |
-| PREP-03 | Phase 0 | Pending |
-| PREP-04 | Phase 0 | Pending |
-| PREP-05 | Phase 0 | Pending |
-| PLAT-01 | Phase 1 | Pending |
-| PLAT-02 | Phase 1 | Pending |
-| PLAT-03 | Phase 1 | Pending |
+| PREP-01 | Phase 0 | Complete |
+| PREP-02 | Phase 0 | Complete |
+| PREP-03 | Phase 0 | Complete |
+| PREP-04 | Phase 0 | Complete |
+| PREP-05 | Phase 0 | Complete |
+| PLAT-01 | Phase 1 | Complete |
+| PLAT-02 | Phase 1 | Complete |
+| PLAT-03 | Phase 1 | Complete |
 | UXUI-01 | Phase 2 | Complete |
 | UXUI-02 | Phase 2 | Complete |
 | UXUI-03 | Phase 2 | Complete |
-| SRCH-01 | Phase 3 | Pending |
-| SRCH-02 | Phase 3 | Pending |
-| SRCH-03 | Phase 3 | Pending |
-| SETT-01 | Phase 3 | Pending |
-| SETT-02 | Phase 3 | Pending |
-| SETT-03 | Phase 3 | Pending |
-| QUEUE-01 | Phase 4 | Pending |
-| QUEUE-02 | Phase 4 | Pending |
-| PROF-01 | Phase 4 | Pending |
-| PROF-02 | Phase 4 | Pending |
-| PROF-03 | Phase 4 | Pending |
-| PROF-04 | Phase 4 | Pending |
-| PROF-05 | Phase 4 | Pending |
+| SRCH-01 | Phase 3 | Complete |
+| SRCH-02 | Phase 3 | Complete |
+| SRCH-03 | Phase 3 | Complete |
+| SETT-01 | Phase 3 | Complete |
+| SETT-02 | Phase 3 | Complete |
+| SETT-03 | Phase 3 | Complete |
+| QUEUE-01 | Phase 4 | Complete |
+| QUEUE-02 | Phase 4 | Complete |
+| PROF-01 | Phase 4 | Complete |
+| PROF-02 | Phase 4 | Complete |
+| PROF-03 | Phase 4 | Complete |
+| PROF-04 | Phase 4 | Complete |
+| PROF-05 | Phase 4 | Complete |
 | DEPS-01 | Phase 5 | Pending |
 | DEPS-02 | Phase 5 | Pending |
 | DEPS-03 | Phase 5 | Pending |

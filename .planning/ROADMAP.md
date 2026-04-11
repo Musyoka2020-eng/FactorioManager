@@ -8,9 +8,9 @@ v1.0 Ui Redesign
 
 - [x] **Phase 0: Pre-Migration Cleanup** - Remove dead code and known bugs from the Tkinter app; write behavioral parity checklist for Phase 1 verification.
 - [x] **Phase 1: Qt Platform Migration and Behavior Parity** - Move all user-facing screens to a single Qt stack while preserving existing downloader, checker, and logging behavior.
-- [ ] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
-- [ ] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
-- [ ] **Phase 4: Queue Control and Profile Workflows** - Enable robust queue execution controls and profile/preset flows with safe preview and rollback.
+- [x] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
+- [x] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
+- [x] **Phase 4: Queue Control and Profile Workflows** - Enable robust queue execution controls and profile/preset flows with safe preview and rollback.
 - [ ] **Phase 5: Dependency Intelligence and Smart Update Guidance** - Provide dependency graph visibility and explainable update risk guidance that feeds batch queue actions.
 - [ ] **Phase 6: Onboarding and Contextual Help** - Add first-run guidance and replayable contextual help so users can adopt advanced workflows quickly.
 
@@ -85,7 +85,7 @@ Plans:
 - [x] 03-03-PLAN.md — SettingsPage widget (mods folder, theme, max_workers, auto_backup, auto_refresh)
 - [x] 03-04-PLAN.md — GlobalSearchBar + SearchResultsPopup + ModDetailsDialog
 - [x] 03-05-PLAN.md — MainWindow wiring: SettingsPage nav, GlobalSearchBar header, ModDetailsDialog, paletteChanged auto-theme
-- [ ] 03-06-PLAN.md — Human verification checkpoint: all 6 requirements end-to-end
+- [x] 03-06-PLAN.md — Human verification checkpoint: all 6 requirements end-to-end
 **UI hint**: yes
 
 ### Phase 4: Queue Control and Profile Workflows
@@ -99,7 +99,14 @@ Plans:
 4. User can preview the apply diff before switching profile and explicitly confirm the changes.
 5. User can apply a profile and undo through a reversible snapshot.
 6. User can enable or disable individual mods via `mod-list.json` toggle inside the app.
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+- [x] 04-01-PLAN.md — Build queue/profile core state, `mod-list.json` persistence, and diff/snapshot contracts
+- [x] 04-02-PLAN.md — Add the shared queue controller, shell badge, queue drawer, and reusable inline queue strips
+- [x] 04-03-PLAN.md — Route downloader operations through the shared queue with recovery actions
+- [x] 04-04-PLAN.md — Add Checker queue integration, installed-mod enable toggles, and profile library/presets
+- [x] 04-05-PLAN.md — Implement profile apply diff preview, queue-backed apply execution, and undo restore
+- [x] 04-06-PLAN.md — Human verification checkpoint for all Phase 4 queue/profile requirements
 **UI hint**: yes
 
 ### Phase 5: Dependency Intelligence and Smart Update Guidance
