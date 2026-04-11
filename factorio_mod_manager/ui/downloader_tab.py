@@ -70,8 +70,16 @@ class DownloadWorker(QThread):
 
             downloader.set_overall_progress_callback(_on_progress)
             downloader.set_mod_progress_callback(_on_mod_status)
-            success = downloader.download_mod(self._mod_url, self._mods_folder)
-            self.finished.emit(success, [])
+
+            # Extract mod name from URL or treat input as a bare mod name
+            import re as _re
+            m = _re.search(r'/mod/([^/?&\s]+)', self._mod_url)
+            mod_name = m.group(1) if m else self._mod_url.strip()
+
+            downloaded, failed = downloader.download_mods(
+                [mod_name], include_optional=self._include_optional
+            )
+            self.finished.emit(len(failed) == 0, failed)
         except PortalAPIError as exc:
             self.log_message.emit(str(exc), "ERROR")
             self.finished.emit(False, [])
@@ -430,8 +438,10 @@ class DownloaderTab(QWidget):
         self.console.setPlaceholderText("Download progress will appear here…")
         prog_layout.addWidget(self.console, stretch=1)
 
-        left_layout.addWidget(self._progress_widget, stretch=1)
-        left_layout.addStretch()
+        left_layout.addWidget(self._progress_widget)
+        self._progress_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
 
         splitter.addWidget(left_widget)
         splitter.setStretchFactor(0, 1)
