@@ -29,7 +29,15 @@ from PySide6.QtWidgets import (
 
 from ..core import ModDownloader
 from ..core.portal import FactorioPortalAPI, PortalAPIError
+from ..core.queue_models import (
+    OperationKind,
+    OperationSource,
+    OperationState,
+    QueueOperation,
+)
 from ..utils import config, validate_mod_url, format_file_size, is_online
+from .download_queue_job import DownloadQueueJob
+from .queue_strip import QueueStrip
 from .widgets import NotificationManager
 from .filter_sort_bar import CategoryChipsBar
 
@@ -204,9 +212,11 @@ class DownloaderTab(QWidget):
         self.logger = logging.getLogger(__name__)
         self.status_manager = status_manager
         self.notification_manager: Optional[NotificationManager] = None
+        self._queue_controller = None    # injected by MainWindow after construction
+        self._active_jobs: dict = {}     # op_id → DownloadQueueJob, keeps jobs alive
         self._search_worker  = None      # keeps SearchWorker alive until done
         self._resolve_worker = None      # keeps ResolveWorker alive until done
-        self._active_worker  = None      # keeps DownloadWorker alive until done
+        self._active_worker  = None      # keeps DownloadWorker alive (legacy fallback)
         self._browse_worker  = None      # keeps CategoryBrowseWorker alive until done
         self._setup_ui()
         self._restore_config()
@@ -217,6 +227,15 @@ class DownloaderTab(QWidget):
 
     def set_notification_manager(self, manager: NotificationManager) -> None:
         self.notification_manager = manager
+
+    def set_queue_controller(self, controller) -> None:
+        """Inject the shared QueueController (called by MainWindow)."""
+        self._queue_controller = controller
+        # Wire the inline strip to the controller
+        if hasattr(self, "_queue_strip"):
+            controller.queue_changed.connect(
+                lambda ops: self._queue_strip.update_from_operations(ops)
+            )
 
     def _notify(
         self,
@@ -412,6 +431,11 @@ class DownloaderTab(QWidget):
         )
         self.download_btn.clicked.connect(self._on_download)
         right_layout.addWidget(self.download_btn)
+
+        # Inline queue strip (between Download button and progress console)
+        self._queue_strip = QueueStrip(source_filter=OperationSource.DOWNLOADER)
+        self._queue_strip.open_queue_requested.connect(self._on_open_queue_requested)
+        right_layout.addWidget(self._queue_strip)
 
         # Progress area (hidden until download starts)
         self._progress_widget = QWidget()
@@ -712,6 +736,12 @@ class DownloaderTab(QWidget):
     # Download
     # ------------------------------------------------------------------
 
+    def _on_open_queue_requested(self) -> None:
+        """Forward queue-strip 'Open Queue' clicks to the main window."""
+        main_win = self.window()
+        if hasattr(main_win, "open_queue_drawer"):
+            main_win.open_queue_drawer()
+
     def _on_download(self):
         url = self.url_edit.text().strip()
         folder = self.folder_edit.text().strip()
@@ -726,7 +756,42 @@ class DownloaderTab(QWidget):
             self._notify("You appear to be offline.", "error")
             return
 
-        # Reset download UI
+        include_optional = self.optional_checkbox.isChecked()
+
+        # ── Queue-backed path ──────────────────────────────────────────
+        if self._queue_controller is not None:
+            import re as _re
+            m = _re.search(r"/mod/([^/?&\s]+)", url)
+            mod_name = m.group(1) if m else url.strip()
+
+            op = QueueOperation(
+                source=OperationSource.DOWNLOADER,
+                kind=OperationKind.DOWNLOAD,
+                label=f"Download {mod_name}",
+            )
+            job = DownloadQueueJob(op, url, folder, include_optional, parent=self)
+            self._active_jobs[op.id] = job
+
+            self._queue_controller.enqueue(op)
+            self._queue_controller.start_next()
+            job.start(self._queue_controller)
+
+            # Keep legacy progress console visible for inline feedback
+            self._progress_widget.setVisible(True)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setProperty("completed", "false")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+            self.console.clear()
+
+            # Mirror queue progress into the inline console
+            self._queue_controller.queue_changed.connect(
+                lambda ops, _oid=op.id: self._on_queue_progress(ops, _oid)
+            )
+            self._notify(f"Queued: Download {mod_name}", "info")
+            return
+
+        # ── Legacy fallback (no queue controller wired) ────────────────
         self.download_btn.setEnabled(False)
         self._progress_widget.setVisible(True)
         self.progress_bar.setValue(0)
@@ -735,7 +800,6 @@ class DownloaderTab(QWidget):
         self.progress_bar.style().polish(self.progress_bar)
         self.console.clear()
 
-        include_optional = self.optional_checkbox.isChecked()
         worker = DownloadWorker(url, folder, include_optional, parent=self)
         self._active_worker = worker
         worker.progress.connect(self._on_progress)
@@ -743,6 +807,30 @@ class DownloaderTab(QWidget):
         worker.log_message.connect(self._append_console)
         worker.finished.connect(self._on_download_finished)
         worker.start()
+
+    def _on_queue_progress(self, operations: list, op_id: str) -> None:
+        """Mirror queue-controller state into the inline progress widget."""
+        for op in operations:
+            if op.id != op_id:
+                continue
+            if op.progress is not None:
+                self.progress_bar.setValue(op.progress)
+            if op.state == OperationState.COMPLETED:
+                self.progress_bar.setValue(100)
+                self.progress_bar.setProperty("completed", "true")
+                self.progress_bar.style().unpolish(self.progress_bar)
+                self.progress_bar.style().polish(self.progress_bar)
+                self._notify("✓ Download complete", "success")
+                if self.status_manager:
+                    self.status_manager.push_status("Download complete", "success")
+                # Clean up finished job reference
+                self._active_jobs.pop(op_id, None)
+            elif op.state == OperationState.FAILED:
+                short = op.failure.short_description if op.failure else "Download failed"
+                self._notify(f"✗ {short}", "error")
+                if self.status_manager:
+                    self.status_manager.push_status("Download failed", "error")
+            break
 
     @Slot(int, int)
     def _on_progress(self, completed, total):

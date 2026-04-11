@@ -1,6 +1,7 @@
 """Mod downloader with dependency resolution."""
 import os
 import shutil
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -36,7 +37,12 @@ class ModDownloader:
         self.portal = FactorioPortalAPI()
         self.max_workers = max_workers
         self.session = requests.Session()
-        
+
+        # Cooperative control events — replaced by DownloadQueueJob before a
+        # managed run so pause/cancel are shared between the job and the thread.
+        self._cancel_event: threading.Event = threading.Event()
+        self._pause_event: threading.Event = threading.Event()
+
         # Callback for progress updates
         self.progress_callback: Optional[Callable] = None
         # Callback for per-mod status updates: (mod_name, status, progress_pct)
@@ -55,6 +61,14 @@ class ModDownloader:
     def set_overall_progress_callback(self, callback: Callable) -> None:
         """Set callback for overall download progress."""
         self.overall_progress_callback = callback
+
+    def set_cancel_event(self, event: threading.Event) -> None:
+        """Replace the cancel event (injected by DownloadQueueJob before start)."""
+        self._cancel_event = event
+
+    def set_pause_event(self, event: threading.Event) -> None:
+        """Replace the pause event (injected by DownloadQueueJob before start)."""
+        self._pause_event = event
 
     def _log_progress(self, message: str) -> None:
         """Log progress message."""
@@ -240,17 +254,35 @@ class ModDownloader:
             # Download to output path
             downloaded_size = 0
             chunk_size = 8192
-            
+            _cancelled = False
             with open(output_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=chunk_size):
+                    # Cooperative pause: block until resumed
+                    while self._pause_event.is_set():
+                        if self._cancel_event.is_set():
+                            break
+                        time.sleep(0.05)
+                    # Cooperative cancel
+                    if self._cancel_event.is_set():
+                        _cancelled = True
+                        break
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
-                        
+
                         # Log progress for large files
                         if total_size > 0 and downloaded_size % (chunk_size * 100) == 0:
                             progress_pct = (downloaded_size / total_size) * 100
                             self._log_progress(f"    Progress: {progress_pct:.1f}%")
+
+            if _cancelled:
+                self._log_progress("  ⚠ Download cancelled")
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except OSError:
+                        pass
+                return False
             
             # Verify file was downloaded
             if not output_path.exists():
