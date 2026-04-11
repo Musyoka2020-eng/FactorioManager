@@ -32,6 +32,7 @@ from ..core import ModDownloader
 from ..core.portal import FactorioPortalAPI, PortalAPIError
 from ..utils import config, validate_mod_url, format_file_size, is_online
 from .widgets import NotificationManager
+from .filter_sort_bar import CategoryChipsBar
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,29 @@ class SearchWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# Worker: CategoryBrowseWorker
+# ---------------------------------------------------------------------------
+
+class CategoryBrowseWorker(QThread):
+    """QThread that fetches portal mods by category."""
+
+    result = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, category: str, parent=None):
+        super().__init__(parent)
+        self._category = category
+
+    def run(self):
+        try:
+            portal = FactorioPortalAPI()
+            results = portal.search_mods("", limit=20, category=self._category)
+            self.result.emit(results)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
 # DownloaderTab — main QWidget
 # ---------------------------------------------------------------------------
 
@@ -176,6 +200,7 @@ class DownloaderTab(QWidget):
         self._search_worker  = None      # keeps SearchWorker alive until done
         self._resolve_worker = None      # keeps ResolveWorker alive until done
         self._active_worker  = None      # keeps DownloadWorker alive until done
+        self._browse_worker  = None      # keeps CategoryBrowseWorker alive until done
         self._sidebar_labels: Dict[str, QLabel] = {}  # mod_name -> status QLabel
         self._setup_ui()
         self._restore_config()
@@ -243,6 +268,11 @@ class DownloaderTab(QWidget):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(16, 16, 8, 16)
         left_layout.setSpacing(12)
+
+        # Category chips bar — portal browse by category
+        self._chips_bar = CategoryChipsBar()
+        self._chips_bar.category_selected.connect(self._on_category_selected)
+        left_layout.addWidget(self._chips_bar)
 
         # Stage 1: URL input and search
         self._stage1_widget = QWidget()
@@ -489,6 +519,25 @@ class DownloaderTab(QWidget):
         self.console.append(f'<span style="color:{color};">{safe}</span>')
         sb = self.console.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    # ------------------------------------------------------------------
+    # Category chip handler
+    # ------------------------------------------------------------------
+
+    def _on_category_selected(self, category: str) -> None:
+        """Fire a portal browse query for the selected category chip."""
+        if self._browse_worker is not None and self._browse_worker.isRunning():
+            self._browse_worker.quit()
+        worker = CategoryBrowseWorker(category, parent=self)
+        self._browse_worker = worker
+        worker.result.connect(self._on_search_result)
+        worker.error.connect(lambda e: self._notify(f"Category browse failed: {e}", "error"))
+        self.search_results_list.clear()
+        placeholder = QListWidgetItem("Loading\u2026")
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.search_results_list.addItem(placeholder)
+        self.search_results_list.setVisible(True)
+        worker.start()
 
     # ------------------------------------------------------------------
     # URL / search handlers

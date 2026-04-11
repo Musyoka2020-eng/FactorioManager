@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QFileDialog,
     QGroupBox,
@@ -18,7 +17,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSplitter,
@@ -34,6 +32,7 @@ from ..utils import config, format_file_size, is_online
 from .widgets import NotificationManager
 from .checker_logic import CheckerLogic
 from .checker_presenter import CheckerPresenter
+from .filter_sort_bar import FilterSortBar
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +133,7 @@ class CheckerTab(QWidget):
     """Qt UI for mod checker / updater."""
 
     _log_signal = Signal(str, str)   # thread-safe bridge for op-log writes
+    mods_loaded = Signal(object)      # emits Dict[str, Mod] after each successful scan
 
     def __init__(self, logger=None, status_manager=None, parent=None):
         super().__init__(parent)
@@ -301,40 +301,13 @@ class CheckerTab(QWidget):
             stats_vbox.addWidget(lbl)
         right_layout.addWidget(stats_group)
 
-        # Search box
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search mods…")
-        self.search_edit.textChanged.connect(self._on_search_changed)
-        right_layout.addWidget(self.search_edit)
-
-        # Status filter buttons
-        filter_group = QGroupBox("Filter")
-        filter_vbox = QVBoxLayout(filter_group)
-        self._filter_btns: Dict[str, QPushButton] = {}
-        for label, key in (("All", "all"), ("Outdated", "outdated"),
-                            ("Up to Date", "up_to_date"), ("Selected", "selected")):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setChecked(key == "all")
-            btn.clicked.connect(lambda checked, k=key: self._on_filter_changed(k))
-            self._filter_btns[key] = btn
-            filter_vbox.addWidget(btn)
-        right_layout.addWidget(filter_group)
-
-        # Sort radio buttons
-        sort_group = QGroupBox("Sort by")
-        sort_vbox = QVBoxLayout(sort_group)
-        self._sort_radios: Dict[str, QRadioButton] = {}
-        sort_btn_group = QButtonGroup(sort_group)
-        for label, key in (("Name", "name"), ("Version", "version"),
-                            ("Downloads", "downloads"), ("Date", "date")):
-            radio = QRadioButton(label)
-            radio.setChecked(key == "name")
-            radio.toggled.connect(lambda checked, k=key: self._on_sort_changed(k) if checked else None)
-            self._sort_radios[key] = radio
-            sort_btn_group.addButton(radio)
-            sort_vbox.addWidget(radio)
-        right_layout.addWidget(sort_group)
+        # Shared filter/sort bar with checker-specific priority combo
+        self._filter_bar = FilterSortBar()
+        self._filter_bar.add_priority_combo(
+            ["Any priority", "Outdated", "Selected", "Errors"]
+        )
+        self._filter_bar.filter_changed.connect(self._on_filter_bar_changed)
+        right_layout.addWidget(self._filter_bar)
         right_layout.addStretch()
 
         # Add panes to splitter
@@ -480,20 +453,12 @@ class CheckerTab(QWidget):
     # Filter / sort handlers
     # ------------------------------------------------------------------
 
-    def _on_search_changed(self, text: str):
-        self._search_query = text
-        self._populate_table(self._mods)
-
-    def _on_filter_changed(self, key: str):
-        self._current_filter = key
-        # Uncheck other filter buttons
-        for k, btn in self._filter_btns.items():
-            btn.setChecked(k == key)
-        self._populate_table(self._mods)
-
-    def _on_sort_changed(self, key: str):
-        self._current_sort = key
-        self._populate_table(self._mods)
+    def _on_filter_bar_changed(self, query: str, status: str, sort_by: str, priority: str) -> None:
+        self._search_query = query
+        self._current_filter = status
+        self._current_sort = sort_by
+        if self._mods:
+            self._populate_table(self._mods)
 
     def _on_checkbox_changed(self, mod_name: str, state: int):
         if state == Qt.CheckState.Checked.value:
@@ -557,6 +522,7 @@ class CheckerTab(QWidget):
     @Slot(object)
     def _on_mods_loaded(self, mods: dict):
         self._mods = mods
+        self.mods_loaded.emit(mods)
         self._populate_table(mods)
         self._update_statistics(mods)
         self._set_idle(f"Found {len(mods)} mod(s)", "#4ec952")
