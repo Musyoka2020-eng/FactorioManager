@@ -10,6 +10,7 @@ from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -36,6 +37,7 @@ from ..core.queue_models import (
     OperationState,
     QueueOperation,
 )
+from ..core.update_guidance import UpdateClassification, GuidanceResult
 from ..utils import config, format_file_size, is_online
 from .widgets import NotificationManager
 from .checker_logic import CheckerLogic
@@ -119,6 +121,149 @@ class UpdateSelectedWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# Worker: ClassifyWorker
+# ---------------------------------------------------------------------------
+
+class ClassifyWorker(QThread):
+    """Runs CheckerLogic.classify_updates() in a background thread."""
+
+    guidance_ready = Signal(object)   # dict[str, GuidanceResult]
+    error = Signal(str)
+
+    def __init__(self, checker_logic: CheckerLogic, mods: dict, parent=None):
+        super().__init__(parent)
+        self._logic = checker_logic
+        self._mods = dict(mods)   # snapshot to avoid races
+
+    def run(self) -> None:
+        try:
+            results = self._logic.classify_updates(self._mods)
+            self.guidance_ready.emit(results)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# SmartUpdateStrip
+# ---------------------------------------------------------------------------
+
+class SmartUpdateStrip(QWidget):
+    """Full-width strip showing guidance counts and Queue Safe Updates CTA."""
+
+    queue_safe_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("smartUpdateStrip")
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(12)
+
+        self._summary_lbl = QLabel("No update guidance yet")
+        self._summary_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self._summary_lbl, stretch=1)
+
+        self._safe_lbl = QLabel("0 Safe")
+        self._safe_lbl.setStyleSheet("color: #4ec952; font-weight: bold;")
+        self._review_lbl = QLabel("0 Review")
+        self._review_lbl.setStyleSheet("color: #ffad00; font-weight: bold;")
+        self._risky_lbl = QLabel("0 Risky")
+        self._risky_lbl.setStyleSheet("color: #d13438; font-weight: bold;")
+        for chip in (self._safe_lbl, self._review_lbl, self._risky_lbl):
+            layout.addWidget(chip)
+
+        self._why_lbl = QLabel("Why not all?")
+        self._why_lbl.setObjectName("searchResultMeta")
+        self._why_lbl.setToolTip(
+            "Safe batch is conservative by design.\n"
+            "Review and Risky items stay manual so you can inspect before queueing."
+        )
+        self._why_lbl.setCursor(Qt.CursorShape.WhatsThisCursor)
+        layout.addWidget(self._why_lbl)
+
+        self._queue_safe_btn = QPushButton("Queue Safe Updates")
+        self._queue_safe_btn.setObjectName("accentButton")
+        self._queue_safe_btn.setEnabled(False)
+        self._queue_safe_btn.clicked.connect(self.queue_safe_requested)
+        layout.addWidget(self._queue_safe_btn)
+
+    def update_guidance(self, scope_mods: list, guidance: dict) -> None:
+        """Refresh strip counts for the given scope."""
+        safe = sum(
+            1 for n in scope_mods
+            if guidance.get(n) and guidance[n].classification == UpdateClassification.SAFE
+        )
+        review = sum(
+            1 for n in scope_mods
+            if guidance.get(n) and guidance[n].classification == UpdateClassification.REVIEW
+        )
+        risky = sum(
+            1 for n in scope_mods
+            if guidance.get(n) and guidance[n].classification == UpdateClassification.RISKY
+        )
+        total = safe + review + risky
+
+        self._safe_lbl.setText(f"{safe} Safe")
+        self._review_lbl.setText(f"{review} Review")
+        self._risky_lbl.setText(f"{risky} Risky")
+
+        if total == 0:
+            self._summary_lbl.setText(
+                "No update guidance yet \u2014 run Check for Updates to classify mods."
+            )
+        else:
+            self._summary_lbl.setText(f"Guidance for {total} outdated mod(s):")
+
+        self._queue_safe_btn.setEnabled(safe > 0)
+
+
+# ---------------------------------------------------------------------------
+# _UpdateConfirmDialog
+# ---------------------------------------------------------------------------
+
+from PySide6.QtWidgets import QDialog as _QDialog
+
+
+class _UpdateConfirmDialog(QDialog):
+    """Confirmation dialog shown when Review/Risky mods are in the selection."""
+
+    def __init__(self, safe: int, review: int, risky: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirm Update Queue")
+        self.setModal(True)
+        self.setMinimumWidth(380)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+
+        msg = QLabel(
+            f"Queue selected updates for confirmed mods?\n\n"
+            f"  \u2713 Safe: {safe}    \u26a0 Review: {review}    \u2717 Risky: {risky}\n\n"
+            "Review and Risky items need explicit confirmation before entering the queue."
+        )
+        msg.setWordWrap(True)
+        msg.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(msg)
+
+        btns = QHBoxLayout()
+        queue_btn = QPushButton("Queue Selected")
+        queue_btn.setObjectName("accentButton")
+        queue_btn.clicked.connect(self.accept)
+        details_btn = QPushButton("View Details")
+        details_btn.clicked.connect(lambda: self.done(2))
+        cancel_btn = QPushButton("Return to Checker")
+        cancel_btn.clicked.connect(self.reject)
+        btns.addWidget(queue_btn)
+        btns.addWidget(details_btn)
+        btns.addStretch()
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+
+
+# ---------------------------------------------------------------------------
 # CheckerTab — main QWidget
 # ---------------------------------------------------------------------------
 
@@ -163,6 +308,10 @@ class CheckerTab(QWidget):
         self._current_sort = "name"
         self._search_query = ""
         self._active_worker = None       # prevents GC before signal delivery
+        self._classify_worker = None     # ClassifyWorker reference
+
+        self._guidance: dict = {}        # name → GuidanceResult
+        self._guidance_filter = "any"    # "any" | "safe" | "review" | "risky"
 
         self._checker: Optional[ModChecker] = None
         self._logic: Optional[CheckerLogic] = None
@@ -291,9 +440,9 @@ class CheckerTab(QWidget):
 
         # ----- CENTER: QTableWidget -----
         self.mod_table = QTableWidget()
-        self.mod_table.setColumnCount(7)
+        self.mod_table.setColumnCount(8)
         self.mod_table.setHorizontalHeaderLabels(
-            ["✔", "On", "Name", "Status", "Version", "Author", "Downloads"]
+            ["✔", "On", "Name", "Status", "Guidance", "Version", "Author", "Downloads"]
         )
         self.mod_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.mod_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -307,6 +456,7 @@ class CheckerTab(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.mod_table.verticalHeader().setVisible(False)
         self.mod_table.setAlternatingRowColors(True)
 
@@ -331,6 +481,38 @@ class CheckerTab(QWidget):
         ):
             stats_vbox.addWidget(lbl)
         right_layout.addWidget(stats_group)
+
+        # Selected Update Guidance panel
+        self._guidance_group = QGroupBox("Selected Update Guidance")
+        guidance_vbox = QVBoxLayout(self._guidance_group)
+        self._guidance_empty_lbl = QLabel(
+            "No update guidance yet\n\nRun Check for Updates to classify installed mods "
+            "and surface safe, review, and risky recommendations."
+        )
+        self._guidance_empty_lbl.setWordWrap(True)
+        self._guidance_empty_lbl.setObjectName("searchResultMeta")
+        guidance_vbox.addWidget(self._guidance_empty_lbl)
+        self._guidance_chip_lbl = QLabel()
+        self._guidance_chip_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self._guidance_chip_lbl.setVisible(False)
+        guidance_vbox.addWidget(self._guidance_chip_lbl)
+        self._guidance_rationale_lbl = QLabel()
+        self._guidance_rationale_lbl.setWordWrap(True)
+        self._guidance_rationale_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self._guidance_rationale_lbl.setVisible(False)
+        guidance_vbox.addWidget(self._guidance_rationale_lbl)
+        self._guidance_delta_lbl = QLabel()
+        self._guidance_delta_lbl.setWordWrap(True)
+        self._guidance_delta_lbl.setObjectName("searchResultMeta")
+        self._guidance_delta_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self._guidance_delta_lbl.setVisible(False)
+        guidance_vbox.addWidget(self._guidance_delta_lbl)
+        self._guidance_details_btn = QPushButton("View Details")
+        self._guidance_details_btn.setVisible(False)
+        self._guidance_details_btn.clicked.connect(self._on_view_details_from_guidance)
+        guidance_vbox.addWidget(self._guidance_details_btn)
+        right_layout.addWidget(self._guidance_group)
+
         right_layout.addStretch()
 
         # Add panes to splitter
@@ -344,13 +526,20 @@ class CheckerTab(QWidget):
         self._filter_bar.add_priority_combo(
             ["Any priority", "Outdated", "Selected", "Errors"]
         )
+        self._filter_bar.add_guidance_combo()
         self._filter_bar.filter_changed.connect(self._on_filter_bar_changed)
+        self._filter_bar.guidance_changed.connect(self._on_guidance_filter_changed)
         workspace_layout.addWidget(self._filter_bar)
 
         # Inline queue strip — shown when checker updates are queued (between filter bar and table)
         self._queue_strip = QueueStrip(source_filter=OperationSource.CHECKER)
         self._queue_strip.open_queue_requested.connect(self._on_open_queue_requested)
         workspace_layout.addWidget(self._queue_strip)
+
+        # Smart update strip — guidance summary above mod table
+        self._smart_strip = SmartUpdateStrip()
+        self._smart_strip.queue_safe_requested.connect(self._on_queue_safe_updates)
+        workspace_layout.addWidget(self._smart_strip)
 
         workspace_layout.addWidget(splitter, stretch=1)
         self.op_log = QTextEdit()
@@ -420,6 +609,14 @@ class CheckerTab(QWidget):
             sort_by=self._current_sort,
         )
 
+        # Apply guidance filter
+        if self._guidance_filter != "any":
+            filtered = [
+                (n, m) for n, m in filtered
+                if n in self._guidance
+                and self._guidance[n].classification.value == self._guidance_filter
+            ]
+
         self.mod_table.setRowCount(0)
         self.mod_table.setRowCount(len(filtered))
 
@@ -464,22 +661,38 @@ class CheckerTab(QWidget):
             status_item.setForeground(QColor(color))
             self.mod_table.setItem(row, 3, status_item)
 
-            # Col 4: version
+            # Col 4: guidance chip (outdated mods only)
+            guidance_text = ""
+            guidance_color = ""
+            if mod.status == ModStatus.OUTDATED and mod_name in self._guidance:
+                g = self._guidance[mod_name]
+                if g.classification == UpdateClassification.SAFE:
+                    guidance_text, guidance_color = "Safe", "#4ec952"
+                elif g.classification == UpdateClassification.REVIEW:
+                    guidance_text, guidance_color = "Review", "#ffad00"
+                elif g.classification == UpdateClassification.RISKY:
+                    guidance_text, guidance_color = "Risky", "#d13438"
+            guidance_item = QTableWidgetItem(guidance_text)
+            if guidance_color:
+                guidance_item.setForeground(QColor(guidance_color))
+            self.mod_table.setItem(row, 4, guidance_item)
+
+            # Col 5: version
             installed = mod.version or "?"
             latest = mod.latest_version or "?"
             version_text = f"{installed} → {latest}" if mod.status == ModStatus.OUTDATED else installed
-            self.mod_table.setItem(row, 4, QTableWidgetItem(version_text))
+            self.mod_table.setItem(row, 5, QTableWidgetItem(version_text))
 
-            # Col 5: author
-            self.mod_table.setItem(row, 5, QTableWidgetItem(mod.author or ""))
+            # Col 6: author
+            self.mod_table.setItem(row, 6, QTableWidgetItem(mod.author or ""))
 
-            # Col 6: downloads
-            self.mod_table.setItem(row, 6, QTableWidgetItem(str(mod.downloads or "")))
+            # Col 7: downloads
+            self.mod_table.setItem(row, 7, QTableWidgetItem(str(mod.downloads or "")))
 
             # Dim text columns for disabled mods (D-14 visual treatment)
             if not getattr(mod, "enabled", True):
                 dim = QColor("#888888")
-                for col_idx in (2, 3, 4, 5, 6):
+                for col_idx in (2, 3, 4, 5, 6, 7):
                     item = self.mod_table.item(row, col_idx)
                     if item:
                         item.setForeground(dim)
@@ -523,6 +736,8 @@ class CheckerTab(QWidget):
         else:
             self._selected_mods.discard(mod_name)
         self._update_button_states()
+        self._update_smart_strip()
+        self._update_guidance_panel()
 
     def _on_enabled_changed(self, mod_name: str, state: int) -> None:
         """Toggle mod enabled state in mod-list.json without deleting the ZIP."""
@@ -539,7 +754,7 @@ class CheckerTab(QWidget):
         for row in range(self.mod_table.rowCount()):
             name_item = self.mod_table.item(row, 2)
             if name_item and name_item.data(Qt.ItemDataRole.UserRole) == mod_name:
-                for col_idx in (2, 3, 4, 5, 6):
+                for col_idx in (2, 3, 4, 5, 6, 7):
                     item = self.mod_table.item(row, col_idx)
                     if item:
                         item.setForeground(dim if not enabled else normal)
@@ -612,6 +827,7 @@ class CheckerTab(QWidget):
         self._set_idle(f"Found {len(mods)} mod(s)", "#4ec952")
         if self.status_manager:
             self.status_manager.push_status(f"Scan complete — {len(mods)} mod(s)", "success")
+        self._start_classify(mods)
 
     @Slot(str)
     def _on_worker_error(self, msg: str):
@@ -630,6 +846,7 @@ class CheckerTab(QWidget):
         self._set_idle(label, "#ffad00" if n else "#4ec952")
         if self.status_manager:
             self.status_manager.push_status(label, "warning" if n else "success")
+        self._start_classify(self._mods)
 
     @Slot(list, list)
     def _on_update_complete(self, successful: list, failed: list):
@@ -813,6 +1030,25 @@ class CheckerTab(QWidget):
         if not self._selected_mods or not self._ensure_logic():
             return
 
+        # Check if any selected mods are Review or Risky
+        non_safe = [
+            n for n in self._selected_mods
+            if n in self._guidance
+            and self._guidance[n].classification != UpdateClassification.SAFE
+        ]
+        if non_safe and self._guidance:
+            safe_count   = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.SAFE)
+            review_count = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.REVIEW)
+            risky_count  = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.RISKY)
+            dlg = _UpdateConfirmDialog(safe_count, review_count, risky_count, parent=self)
+            result = dlg.exec()
+            if result == QDialog.DialogCode.Rejected:
+                return
+            elif result == 2:  # "View Details"
+                self._on_view_details()
+                return
+            # result == Accepted → proceed with queue
+
         if self._queue_controller is not None:
             mod_names = list(self._selected_mods)
             label = f"Update {len(mod_names)} mod(s)"
@@ -974,13 +1210,167 @@ class CheckerTab(QWidget):
         mod = self._mods.get(mod_name)
         if not mod:
             return
-        title = mod.title or mod_name
-        info_lines = [
-            f"Name: {mod_name}",
-            f"Title: {title}",
-            f"Author: {mod.author or 'Unknown'}",
-            f"Installed: {mod.version or '?'}",
-            f"Latest: {mod.latest_version or '?'}",
-            f"Status: {mod.status.name}",
+        from .mod_details_dialog import ModDetailsDialog
+        dlg = ModDetailsDialog(data=mod, source="installed", parent=self,
+                               installed_mods=self._mods)
+        dlg.exec()
+
+    def _on_view_details_from_guidance(self) -> None:
+        """View Details from the guidance panel — deep-links to Dependencies tab."""
+        if len(self._selected_mods) != 1:
+            return
+        mod_name = next(iter(self._selected_mods))
+        mod = self._mods.get(mod_name)
+        if not mod:
+            return
+        from .mod_details_dialog import ModDetailsDialog
+        dlg = ModDetailsDialog(data=mod, source="installed", parent=self,
+                               installed_mods=self._mods, initial_tab="dependencies")
+        dlg.exec()
+
+    def _start_classify(self, mods: dict) -> None:
+        """Kick off background guidance classification for all loaded mods."""
+        if not self._logic or not mods:
+            return
+        worker = ClassifyWorker(self._logic, mods, parent=self)
+        worker.guidance_ready.connect(self._on_guidance_ready)
+        worker.error.connect(lambda msg: self.logger.warning("Classify error: %s", msg))
+        worker.start()
+        self._classify_worker = worker
+
+    @Slot(object)
+    def _on_guidance_ready(self, results: dict) -> None:
+        """Receive classified guidance dict from ClassifyWorker."""
+        self._guidance = results
+        self._update_smart_strip()
+        self._update_guidance_panel()
+        if self._mods:
+            self._populate_table(self._mods)
+
+    def _update_smart_strip(self) -> None:
+        """Recompute SmartUpdateStrip scope and refresh counts."""
+        if not hasattr(self, "_smart_strip"):
+            return
+        if self._selected_mods:
+            scope = [
+                n for n in self._selected_mods
+                if self._mods.get(n) and self._mods[n].status == ModStatus.OUTDATED
+            ]
+        else:
+            filtered = self._presenter.filter_mods(
+                self._mods, self._search_query, self._current_filter,
+                self._selected_mods, self._current_sort,
+            )
+            scope = [n for n, m in filtered if m.status == ModStatus.OUTDATED]
+        self._smart_strip.update_guidance(scope, self._guidance)
+
+    def _update_guidance_panel(self) -> None:
+        """Refresh the Selected Update Guidance panel for current selection."""
+        if not hasattr(self, "_guidance_group"):
+            return
+        n_selected = len(self._selected_mods)
+
+        if n_selected == 0:
+            self._guidance_empty_lbl.setText(
+                "No update guidance yet\n\nRun Check for Updates to classify installed mods "
+                "and surface safe, review, and risky recommendations."
+            )
+            self._guidance_empty_lbl.setVisible(True)
+            for w in (self._guidance_chip_lbl, self._guidance_rationale_lbl,
+                      self._guidance_delta_lbl, self._guidance_details_btn):
+                w.setVisible(False)
+
+        elif n_selected == 1:
+            mod_name = next(iter(self._selected_mods))
+            result = self._guidance.get(mod_name)
+            if result is None:
+                self._guidance_empty_lbl.setText(
+                    "No guidance available \u2014 run Check for Updates first."
+                )
+                self._guidance_empty_lbl.setVisible(True)
+                for w in (self._guidance_chip_lbl, self._guidance_rationale_lbl,
+                          self._guidance_delta_lbl, self._guidance_details_btn):
+                    w.setVisible(False)
+                return
+
+            self._guidance_empty_lbl.setVisible(False)
+            chip_text, chip_color = CheckerPresenter.guidance_chip_info(
+                result.classification
+            )
+            self._guidance_chip_lbl.setText(chip_text)
+            self._guidance_chip_lbl.setStyleSheet(
+                f"color: {chip_color}; font-weight: bold;"
+            )
+            self._guidance_chip_lbl.setVisible(True)
+
+            self._guidance_rationale_lbl.setText(
+                "\n".join(f"\u2022 {r}" for r in result.rationale)
+            )
+            self._guidance_rationale_lbl.setVisible(True)
+
+            self._guidance_delta_lbl.setText(result.dep_delta_summary)
+            self._guidance_delta_lbl.setVisible(True)
+
+            self._guidance_details_btn.setVisible(True)
+
+        else:
+            safe_n   = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.SAFE)
+            review_n = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.REVIEW)
+            risky_n  = sum(1 for n in self._selected_mods if self._guidance.get(n) and self._guidance[n].classification == UpdateClassification.RISKY)
+            self._guidance_empty_lbl.setText(
+                f"{n_selected} mods selected\n\u2713 Safe: {safe_n}  \u26a0 Review: {review_n}  \u2717 Risky: {risky_n}\n\n"
+                "Only Safe items enter the one-click batch. Review and Risky items stay manual."
+            )
+            self._guidance_empty_lbl.setVisible(True)
+            for w in (self._guidance_chip_lbl, self._guidance_rationale_lbl,
+                      self._guidance_delta_lbl, self._guidance_details_btn):
+                w.setVisible(False)
+
+    def _on_queue_safe_updates(self) -> None:
+        """Queue only mods classified Safe in the current scope."""
+        if not self._ensure_logic() or self._queue_controller is None:
+            return
+        if self._selected_mods:
+            scope = [
+                n for n in self._selected_mods
+                if self._mods.get(n) and self._mods[n].status == ModStatus.OUTDATED
+            ]
+        else:
+            filtered = self._presenter.filter_mods(
+                self._mods, self._search_query, self._current_filter,
+                self._selected_mods, self._current_sort,
+            )
+            scope = [n for n, m in filtered if m.status == ModStatus.OUTDATED]
+        safe_names = [
+            n for n in scope
+            if n in self._guidance
+            and self._guidance[n].classification == UpdateClassification.SAFE
         ]
-        self._notify("\n".join(info_lines), "info", duration_ms=8000)
+        if not safe_names:
+            self._notify("No Safe updates in current scope.", "info")
+            return
+        label = f"Queue Safe Updates ({len(safe_names)} mod(s))"
+        op = QueueOperation(
+            source=OperationSource.CHECKER,
+            kind=OperationKind.UPDATE,
+            label=label,
+        )
+        job = UpdateQueueJob(op, safe_names, self._logic, parent=self)
+        self._active_jobs[op.id] = job
+        self._queue_controller.enqueue(op)
+        self._queue_controller.start_next()
+        job.start(self._queue_controller)
+        self._queue_controller.queue_changed.connect(
+            lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+        )
+        self._notify(
+            f"Queued: {label}\nOnly Safe updates are queued here. "
+            "Review and Risky items stay manual.",
+            "info",
+        )
+
+    def _on_guidance_filter_changed(self, guidance: str) -> None:
+        self._guidance_filter = guidance
+        if self._mods:
+            self._populate_table(self._mods)
+        self._update_smart_strip()

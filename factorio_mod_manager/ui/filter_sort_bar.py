@@ -22,6 +22,7 @@ class FilterSortBar(QWidget):
     """
 
     filter_changed = Signal(str, str, str, str)
+    guidance_changed = Signal(str)   # "any" | "safe" | "review" | "risky"
 
     _STATUS_OPTIONS: list[tuple[str, str]] = [
         ("All", "all"),
@@ -75,6 +76,27 @@ class FilterSortBar(QWidget):
             self._priority_combo.addItem(label)
         self._priority_combo.currentIndexChanged.connect(self._schedule_emit)
         self.layout().addWidget(self._priority_combo)
+
+    _GUIDANCE_OPTIONS: list[tuple[str, str]] = [
+        ("Any guidance", "any"),
+        ("Safe", "safe"),
+        ("Review", "review"),
+        ("Risky", "risky"),
+    ]
+
+    def add_guidance_combo(self) -> None:
+        """Inject the guidance tier filter combo. Call once from CheckerTab._setup_ui."""
+        self._guidance_combo = QComboBox()
+        for label, _ in self._GUIDANCE_OPTIONS:
+            self._guidance_combo.addItem(label)
+        self._guidance_combo.currentIndexChanged.connect(self._on_guidance_changed)
+        self.layout().addWidget(self._guidance_combo)
+
+    def _on_guidance_changed(self) -> None:
+        if not hasattr(self, "_guidance_combo"):
+            return
+        value = self._GUIDANCE_OPTIONS[self._guidance_combo.currentIndex()][1]
+        self.guidance_changed.emit(value)
 
     def _schedule_emit(self) -> None:
         self._debounce.start()

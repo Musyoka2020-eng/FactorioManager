@@ -1,6 +1,7 @@
 """Business logic for checker tab - thread operations separated from UI."""
 from typing import Callable, Optional, List, Dict
 from ..core import ModChecker, Mod
+from ..core.update_guidance import UpdateGuidanceClassifier, GuidanceResult, UpdateClassification
 
 
 class CheckerLogic:
@@ -47,6 +48,31 @@ class CheckerLogic:
             self.logger(f"[CHECK] ✗ Error: {e}", "error")
             raise
     
+    def classify_updates(self, mods: dict) -> dict:
+        """Classify all mods in the dict as Safe/Review/Risky.
+
+        Only mods with status OUTDATED are meaningfully classified;
+        others return SAFE (no update to assess).
+
+        Returns:
+            dict[str, GuidanceResult]
+        """
+        from ..core.mod import ModStatus
+        results = {}
+        for name, mod in mods.items():
+            try:
+                result = UpdateGuidanceClassifier.classify_mod(mod, mods)
+                results[name] = result
+                self.logger(f"[CLASSIFY] {name}: {result.classification.value}", "info")
+            except Exception as exc:
+                self.logger(f"[CLASSIFY] \u2717 {name}: {exc}", "error")
+                results[name] = GuidanceResult(
+                    classification=UpdateClassification.REVIEW,
+                    rationale=["Classification failed \u2014 verify before applying"],
+                    dep_delta_summary="unknown",
+                )
+        return results
+
     def update_mods(self, mod_names: List[str]) -> tuple[List[str], List[str]]:
         """
         Update multiple mods.

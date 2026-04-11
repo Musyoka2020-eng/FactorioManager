@@ -111,3 +111,17 @@ class CheckerPresenter:
             ("❓ Unknown", f"{stats['unknown']}"),
             ("✗ Errors", f"{stats['errors']}"),
         ]
+
+    @staticmethod
+    def guidance_chip_info(classification) -> tuple[str, str]:
+        """Returns (display_text, hex_color) for a guidance classification chip.
+
+        Colors follow UI-SPEC semantic mapping: Safe=SUCCESS, Review=WARNING, Risky=ERROR.
+        """
+        from ..core.update_guidance import UpdateClassification
+        mapping = {
+            UpdateClassification.SAFE:   ("\u2713 Safe",   "#4ec952"),
+            UpdateClassification.REVIEW: ("\u26a0 Review", "#ffad00"),
+            UpdateClassification.RISKY:  ("\u2717 Risky",  "#d13438"),
+        }
+        return mapping.get(classification, ("? Unknown", "#b0b0b0"))
