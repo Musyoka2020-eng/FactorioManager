@@ -300,14 +300,6 @@ class CheckerTab(QWidget):
         ):
             stats_vbox.addWidget(lbl)
         right_layout.addWidget(stats_group)
-
-        # Shared filter/sort bar with checker-specific priority combo
-        self._filter_bar = FilterSortBar()
-        self._filter_bar.add_priority_combo(
-            ["Any priority", "Outdated", "Selected", "Errors"]
-        )
-        self._filter_bar.filter_changed.connect(self._on_filter_bar_changed)
-        right_layout.addWidget(self._filter_bar)
         right_layout.addStretch()
 
         # Add panes to splitter
@@ -315,9 +307,16 @@ class CheckerTab(QWidget):
         splitter.addWidget(self.mod_table)
         splitter.addWidget(right_widget)
         splitter.setStretchFactor(1, 1)
-        workspace_layout.addWidget(splitter, stretch=1)
 
-        # Operation log
+        # Filter/sort toolbar — full width above the table, below the splitter
+        self._filter_bar = FilterSortBar()
+        self._filter_bar.add_priority_combo(
+            ["Any priority", "Outdated", "Selected", "Errors"]
+        )
+        self._filter_bar.filter_changed.connect(self._on_filter_bar_changed)
+        workspace_layout.addWidget(self._filter_bar)
+
+        workspace_layout.addWidget(splitter, stretch=1)
         self.op_log = QTextEdit()
         self.op_log.setReadOnly(True)
         self.op_log.setFixedHeight(120)

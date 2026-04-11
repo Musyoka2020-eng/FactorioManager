@@ -33,7 +33,7 @@ class ModDownloader:
         """
         self.mods_folder = Path(mods_folder)
         self.mods_folder.mkdir(parents=True, exist_ok=True)
-        self.portal = FactorioPortalAPI(username, token)
+        self.portal = FactorioPortalAPI()
         self.max_workers = max_workers
         self.session = requests.Session()
         

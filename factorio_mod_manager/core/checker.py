@@ -28,8 +28,8 @@ class ModChecker:
             token: Factorio API token
         """
         self.mods_folder = Path(mods_folder)
-        self.portal = FactorioPortalAPI(username, token)
-        self.downloader = ModDownloader(str(self.mods_folder), username, token)
+        self.portal = FactorioPortalAPI()
+        self.downloader = ModDownloader(str(self.mods_folder))
         self.mods: Dict[str, Mod] = {}
         self.last_update_check: Optional[datetime] = None
         
