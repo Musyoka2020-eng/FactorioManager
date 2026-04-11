@@ -11,7 +11,7 @@ v1.0 Ui Redesign
 - [x] **Phase 2: Fluent Shell and UX System** - Deliver a cohesive Fluent glassy shell, consistent navigation, and clear action feedback across core screens.
 - [x] **Phase 3: Search, Filtering, and Settings Foundation** - Add unified search/sort/filter plus centralized settings, theming, and safe credential handling.
 - [x] **Phase 4: Queue Control and Profile Workflows** - Enable robust queue execution controls and profile/preset flows with safe preview and rollback.
-- [ ] **Phase 5: Dependency Intelligence and Smart Update Guidance** - Provide dependency graph visibility and explainable update risk guidance that feeds batch queue actions.
+- [x] **Phase 5: Dependency Intelligence and Smart Update Guidance** - Provide dependency graph visibility and explainable update risk guidance that feeds batch queue actions.
 - [ ] **Phase 6: Onboarding and Contextual Help** - Add first-run guidance and replayable contextual help so users can adopt advanced workflows quickly.
 
 ## Phase Details
@@ -122,10 +122,10 @@ Plans:
 6. User can view per-mod changelog content inside the mod details popup.
 **Plans**: 4 plans
 Plans:
-- [ ] 05-01-PLAN.md — TDD: dependency_graph.py (build_dep_graph, DepType, DepNode, DepState) and update_guidance.py (UpdateGuidanceClassifier, GuidanceResult, UpdateClassification) with full test coverage
-- [ ] 05-02-PLAN.md — ModDetailsDialog refactored to QTabWidget with Dependencies (DepGraphWorker + QTreeWidget + simplified/full toggle) and Changelog (ChangelogWorker + delta rendering) tabs
-- [ ] 05-03-PLAN.md — Checker intelligence: ClassifyWorker, SmartUpdateStrip, Guidance column, Queue Safe Updates, guidance filter, Selected Update Guidance panel, fix _on_view_details
-- [ ] 05-04-PLAN.md — Human UAT checkpoint: verify all 6 Phase 5 success criteria in the running app
+- [x] 05-01-PLAN.md — TDD: dependency_graph.py (build_dep_graph, DepType, DepNode, DepState) and update_guidance.py (UpdateGuidanceClassifier, GuidanceResult, UpdateClassification) with full test coverage
+- [x] 05-02-PLAN.md — ModDetailsDialog refactored to QTabWidget with Dependencies (DepGraphWorker + QTreeWidget + simplified/full toggle) and Changelog (ChangelogWorker + delta rendering) tabs
+- [x] 05-03-PLAN.md — Checker intelligence: ClassifyWorker, SmartUpdateStrip, Guidance column, Queue Safe Updates, guidance filter, Selected Update Guidance panel, fix _on_view_details
+- [x] 05-04-PLAN.md — Human UAT checkpoint: verify all 6 Phase 5 success criteria in the running app
 **UI hint**: yes
 
 ### Phase 6: Onboarding and Contextual Help
@@ -148,5 +148,5 @@ Plans:
 | 2. Fluent Shell and UX System | 0/0 | Not started | - |
 | 3. Search, Filtering, and Settings Foundation | 0/0 | Not started | - |
 | 4. Queue Control and Profile Workflows | 0/0 | Not started | - |
-| 5. Dependency Intelligence and Smart Update Guidance | 0/0 | Not started | - |
+| 5. Dependency Intelligence and Smart Update Guidance | 4/4 | Complete | 2026-04-11 |
 | 6. Onboarding and Contextual Help | 0/0 | Not started | - |
