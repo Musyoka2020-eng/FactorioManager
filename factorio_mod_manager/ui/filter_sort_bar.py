@@ -127,18 +127,19 @@ class CategoryChipsBar(QWidget):
 
     category_selected = Signal(str)
 
-    KNOWN_CATEGORIES: list[str] = [
-        "All",
-        "combat",
-        "logistics",
-        "trains",
-        "mining",
-        "energy",
-        "environment",
-        "cheats",
-        "circuit-network",
-        "library",
-        "big-mods",
+    # Each entry is (display_label, api_value).  "All" chip uses the sentinel
+    # value "All" and emits "" (empty string) to mean "no filter".
+    KNOWN_CATEGORIES: list[tuple[str, str]] = [
+        ("All",           "All"),
+        ("Content",       "content"),
+        ("Overhaul",      "overhaul"),
+        ("Tweaks",        "tweaks"),
+        ("Utilities",     "utilities"),
+        ("Scenarios",     "scenarios"),
+        ("Mod Packs",     "mod-packs"),
+        ("Localizations", "localizations"),
+        ("Internal",      "internal"),
+        ("No category",   "__no_category__"),
     ]
 
     def __init__(self, parent=None):
@@ -166,8 +167,12 @@ class CategoryChipsBar(QWidget):
         self._scroll.setWidget(self._chips_widget)
         outer.addWidget(self._scroll)
 
-    def load_categories(self, categories: list[str]) -> None:
-        """Replace current chips with a new category list."""
+    def load_categories(self, categories: list) -> None:
+        """Replace current chips with a new category list.
+
+        *categories* may be ``list[str]`` (label == value) or
+        ``list[tuple[str, str]]`` (display_label, api_value).
+        """
         # Remove all widgets except trailing stretch
         while self._chips_layout.count() > 1:
             item = self._chips_layout.takeAt(0)
@@ -175,11 +180,16 @@ class CategoryChipsBar(QWidget):
                 item.widget().deleteLater()
         self._active_chip = None
 
-        for cat in categories:
-            btn = QPushButton(cat)
+        for entry in categories:
+            if isinstance(entry, tuple):
+                label, value = entry
+            else:
+                label = value = entry
+            btn = QPushButton(label)
             btn.setObjectName("categoryChip")
+            btn.setProperty("category_value", value)
             btn.clicked.connect(
-                lambda checked=False, c=cat, b=btn: self._on_chip_clicked(c, b)
+                lambda checked=False, v=value, b=btn: self._on_chip_clicked(v, b)
             )
             # Insert before trailing stretch
             self._chips_layout.insertWidget(self._chips_layout.count() - 1, btn)
@@ -189,9 +199,10 @@ class CategoryChipsBar(QWidget):
         if first:
             self._set_active(first)
 
-    def _on_chip_clicked(self, category: str, btn: QPushButton) -> None:
+    def _on_chip_clicked(self, value: str, btn: QPushButton) -> None:
         self._set_active(btn)
-        self.category_selected.emit("" if category == "All" else category)
+        # "All" sentinel → emit empty string (no category filter)
+        self.category_selected.emit("" if value == "All" else value)
 
     def _set_active(self, btn: QPushButton) -> None:
         if self._active_chip is not None:
@@ -203,10 +214,92 @@ class CategoryChipsBar(QWidget):
         btn.style().polish(btn)
         self._active_chip = btn
 
-    def select_chip(self, category: str) -> None:
-        """Programmatically activate the chip matching *category* without emitting the signal."""
+    def select_chip(self, value: str) -> None:
+        """Programmatically activate the chip matching *value* without emitting the signal.
+
+        *value* is the api_value (e.g. ``"content"``, ``"All"``).
+        """
         for i in range(self._chips_layout.count()):
             widget = self._chips_layout.itemAt(i).widget()
-            if isinstance(widget, QPushButton) and widget.text() == category:
+            if not isinstance(widget, QPushButton):
+                continue
+            chip_val = widget.property("category_value")
+            # Fall back to button text for chips created without the property
+            if chip_val is None:
+                chip_val = widget.text()
+            if chip_val == value:
                 self._set_active(widget)
                 return
+
+
+# ---------------------------------------------------------------------------
+# VersionFilterBar — Factorio version chip selector
+# ---------------------------------------------------------------------------
+
+class VersionFilterBar(QWidget):
+    """Horizontal chip bar for filtering mods by Factorio version.
+
+    Emits version_selected(version: str).
+    Empty string means "All Versions".
+    """
+
+    version_selected = Signal(str)
+
+    KNOWN_VERSIONS: list[tuple[str, str]] = [
+        ("All Versions",  ""),
+        ("Space Age 2.0", "2.0"),
+        ("Legacy 1.1",    "1.1"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._active_chip: QPushButton | None = None
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._scroll = QScrollArea()
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFixedHeight(34)
+
+        self._chips_widget = QWidget()
+        self._chips_layout = QHBoxLayout(self._chips_widget)
+        self._chips_layout.setContentsMargins(8, 3, 8, 3)
+        self._chips_layout.setSpacing(6)
+        self._chips_layout.addStretch()
+        self._scroll.setWidget(self._chips_widget)
+        outer.addWidget(self._scroll)
+
+        for label, value in self.KNOWN_VERSIONS:
+            btn = QPushButton(label)
+            btn.setObjectName("categoryChip")
+            btn.setProperty("category_value", value)
+            btn.clicked.connect(
+                lambda checked=False, v=value, b=btn: self._on_chip_clicked(v, b)
+            )
+            self._chips_layout.insertWidget(self._chips_layout.count() - 1, btn)
+
+        # Activate "All Versions" by default
+        first = self._chips_layout.itemAt(0).widget() if self._chips_layout.count() > 1 else None
+        if first:
+            self._set_active(first)
+
+    def _on_chip_clicked(self, value: str, btn: QPushButton) -> None:
+        self._set_active(btn)
+        self.version_selected.emit(value)
+
+    def _set_active(self, btn: QPushButton) -> None:
+        if self._active_chip is not None:
+            self._active_chip.setProperty("selected", False)
+            self._active_chip.style().unpolish(self._active_chip)
+            self._active_chip.style().polish(self._active_chip)
+        btn.setProperty("selected", True)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        self._active_chip = btn
+

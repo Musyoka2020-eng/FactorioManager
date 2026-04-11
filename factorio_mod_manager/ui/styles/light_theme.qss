@@ -591,6 +591,60 @@ QPushButton#categoryChip[selected="true"] {{
     border: 1px solid {LIGHT_ACCENT};
 }}
 
+/* ── Mod Browse Cards ─────────────────────────────────────── */
+QFrame#modBrowseCard {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    padding: 2px;
+}}
+QFrame#modBrowseCard:hover {{
+    border-color: {LIGHT_BORDER_HOVER};
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+QLabel#modCardTitle {{
+    font-weight: 600;
+    color: {LIGHT_FG_PRIMARY};
+    font-size: 10pt;
+}}
+QLabel#modCardMeta {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QLabel#modCardSummary {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QLabel#modCardCategory {{
+    color: {LIGHT_ACCENT};
+    font-size: 8pt;
+    border: 1px solid {LIGHT_ACCENT};
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+
+/* ── Pagination bar ───────────────────────────────────────── */
+QPushButton#paginationBtn {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    padding: 3px 12px;
+    font-size: 9pt;
+}}
+QPushButton#paginationBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+QPushButton#paginationBtn:disabled {{
+    color: {LIGHT_FG_DISABLED};
+    border-color: {LIGHT_BORDER_DEFAULT};
+}}
+QLabel#paginationLabel {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+
 /* ── Phase 3: Settings Button (header utility zone) ──────── */
 QPushButton#settingsButton {{
     background-color: transparent;

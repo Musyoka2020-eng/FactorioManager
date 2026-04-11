@@ -13,13 +13,13 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTextEdit,
@@ -39,7 +39,7 @@ from ..utils import config, validate_mod_url, format_file_size, is_online
 from .download_queue_job import DownloadQueueJob
 from .queue_strip import QueueStrip
 from .widgets import NotificationManager
-from .filter_sort_bar import CategoryChipsBar
+from .filter_sort_bar import CategoryChipsBar, VersionFilterBar
 
 
 # ---------------------------------------------------------------------------
@@ -128,34 +128,28 @@ class ResolveWorker(QThread):
 class SearchWorker(QThread):
     """QThread that searches the portal for mods matching a query string."""
 
-    result = Signal(list)
+    result = Signal(list, int, int, int)   # (results, token, page, total_pages)
     error = Signal(str)
 
-    def __init__(self, query, parent=None):
+    def __init__(self, query: str, category: str = "", version: str = "",
+                 page: int = 1, token: int = 0, parent=None):
         super().__init__(parent)
-        self._query = query
+        self._query    = query
+        self._category = category
+        self._version  = version
+        self._page     = page
+        self._token    = token
 
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            # Request 50 candidates; portal will page_size=50 let us rank properly
-            raw: List[dict] = portal.search_mods(self._query, limit=50)
-            q = self._query.lower()
-
-            def _rank(entry):
-                name  = (entry.get("name")  or "").lower()
-                title = (entry.get("title") or "").lower()
-                if name == q or title == q:        return 0  # exact
-                if name.startswith(q):             return 1  # name prefix
-                if title.startswith(q):            return 2  # title prefix
-                if q in name:                      return 3  # name contains
-                if q in title:                     return 4  # title contains
-                return 5                                     # no match
-
-            raw.sort(key=_rank)
-            # Drop completely unrelated entries; fall back if nothing matched
-            relevant = [e for e in raw if _rank(e) < 5]
-            self.result.emit((relevant if relevant else raw)[:8])
+            results, cur_page, total_pages = portal.search_mods(
+                self._query, limit=20,
+                category=self._category,
+                version=self._version,
+                page=self._page,
+            )
+            self.result.emit(results, self._token, cur_page, total_pages)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -167,20 +161,96 @@ class SearchWorker(QThread):
 class CategoryBrowseWorker(QThread):
     """QThread that fetches portal mods by category."""
 
-    result = Signal(list)
+    result = Signal(list, int, int, int)   # (results, token, page, total_pages)
     error = Signal(str)
 
-    def __init__(self, category: str, parent=None):
+    def __init__(self, category: str, version: str = "", page: int = 1,
+                 token: int = 0, parent=None):
         super().__init__(parent)
         self._category = category
+        self._version  = version
+        self._page     = page
+        self._token    = token
 
     def run(self):
         try:
             portal = FactorioPortalAPI()
-            results = portal.search_mods("", limit=20, category=self._category)
-            self.result.emit(results)
+            results, cur_page, total_pages = portal.search_mods(
+                "", limit=20,
+                category=self._category,
+                version=self._version,
+                page=self._page,
+            )
+            self.result.emit(results, self._token, cur_page, total_pages)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# ModBrowseCard — clickable card shown in the browse grid
+# ---------------------------------------------------------------------------
+
+class ModBrowseCard(QFrame):
+    """Single card in the mod-browse grid.
+
+    Emits clicked(mod_name: str) when the user clicks anywhere on the card.
+    """
+
+    clicked = Signal(str)
+
+    def __init__(self, entry: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("modBrowseCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mod_name = entry.get("name", "")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(3)
+
+        # Title + category badge row
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+
+        title_lbl = QLabel(entry.get("title") or entry.get("name", ""))
+        title_lbl.setObjectName("modCardTitle")
+        title_lbl.setWordWrap(False)
+        title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        title_row.addWidget(title_lbl, stretch=1)
+
+        cat = (entry.get("category") or "").replace("-", " ").title()
+        if cat:
+            cat_lbl = QLabel(cat)
+            cat_lbl.setObjectName("modCardCategory")
+            title_row.addWidget(cat_lbl)
+
+        layout.addLayout(title_row)
+
+        # Meta row: author · vN · N downloads
+        meta_parts = []
+        owner = entry.get("owner", "")
+        if owner:
+            meta_parts.append(f"by {owner}")
+        dl = entry.get("downloads_count", 0)
+        if dl:
+            meta_parts.append(f"{dl:,}\u2193")
+        meta_lbl = QLabel("  \u00b7  ".join(meta_parts))
+        meta_lbl.setObjectName("modCardMeta")
+        layout.addWidget(meta_lbl)
+
+        # Summary (2 lines max)
+        summary = (entry.get("summary") or "")[:160]
+        if summary:
+            summ_lbl = QLabel(summary)
+            summ_lbl.setObjectName("modCardSummary")
+            summ_lbl.setWordWrap(True)
+            summ_lbl.setMaximumHeight(40)
+            layout.addWidget(summ_lbl)
+
+    def mousePressEvent(self, event):  # noqa: N802
+        self.clicked.emit(self._mod_name)
+        super().mousePressEvent(event)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +288,13 @@ class DownloaderTab(QWidget):
         self._resolve_worker = None      # keeps ResolveWorker alive until done
         self._active_worker  = None      # keeps DownloadWorker alive (legacy fallback)
         self._browse_worker  = None      # keeps CategoryBrowseWorker alive until done
+        self._request_token  = 0         # incremented on every new search/browse request
+        self._current_query    = ""
+        self._current_category = ""
+        self._current_version  = ""
+        self._current_page     = 1
+        self._total_pages      = 1
+        self._initial_load_done = False
         self._setup_ui()
         self._restore_config()
 
@@ -307,14 +384,57 @@ class DownloaderTab(QWidget):
         self._chips_bar.category_selected.connect(self._on_category_selected)
         left_layout.addWidget(self._chips_bar)
 
-        # 3. Results list — always visible, expands to fill remaining space
-        self.search_results_list = QListWidget()
-        self.search_results_list.setSizePolicy(
+        # 3. Version filter chips
+        self._version_bar = VersionFilterBar()
+        self._version_bar.version_selected.connect(self._on_version_selected)
+        left_layout.addWidget(self._version_bar)
+
+        # 4. Scrollable grid of mod cards
+        self._grid_scroll = QScrollArea()
+        self._grid_scroll.setWidgetResizable(True)
+        self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._grid_scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.search_results_list.itemClicked.connect(self._on_result_selected)
-        self._show_results_placeholder()
-        left_layout.addWidget(self.search_results_list, stretch=1)
+
+        self._grid_container = QWidget()
+        self._grid_layout = QGridLayout(self._grid_container)
+        self._grid_layout.setSpacing(8)
+        self._grid_layout.setContentsMargins(0, 0, 0, 0)
+        # Two equal-width columns
+        self._grid_layout.setColumnStretch(0, 1)
+        self._grid_layout.setColumnStretch(1, 1)
+        self._grid_scroll.setWidget(self._grid_container)
+        left_layout.addWidget(self._grid_scroll, stretch=1)
+
+        # 5. Pagination bar
+        pagination_widget = QWidget()
+        pagination_layout = QHBoxLayout(pagination_widget)
+        pagination_layout.setContentsMargins(0, 4, 0, 4)
+        pagination_layout.setSpacing(8)
+
+        self._prev_btn = QPushButton("← Prev")
+        self._prev_btn.setObjectName("paginationBtn")
+        self._prev_btn.setEnabled(False)
+        self._prev_btn.clicked.connect(self._on_prev_page)
+        pagination_layout.addWidget(self._prev_btn)
+
+        pagination_layout.addStretch()
+
+        self._page_lbl = QLabel("Page 1 of 1")
+        self._page_lbl.setObjectName("paginationLabel")
+        self._page_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pagination_layout.addWidget(self._page_lbl)
+
+        pagination_layout.addStretch()
+
+        self._next_btn = QPushButton("Next →")
+        self._next_btn.setObjectName("paginationBtn")
+        self._next_btn.setEnabled(False)
+        self._next_btn.clicked.connect(self._on_next_page)
+        pagination_layout.addWidget(self._next_btn)
+
+        left_layout.addWidget(pagination_widget)
 
         splitter.addWidget(left_widget)
         splitter.setStretchFactor(0, 1)
@@ -491,32 +611,114 @@ class DownloaderTab(QWidget):
     # Category chip handler
     # ------------------------------------------------------------------
 
-    def _show_results_placeholder(self) -> None:
-        """Show browse hint in results list when no results are loaded."""
-        self.search_results_list.clear()
-        item = QListWidgetItem("Browse by category above or type a mod name to search…")
-        item.setFlags(Qt.ItemFlag.NoItemFlags)
-        self.search_results_list.addItem(item)
+    # ------------------------------------------------------------------
+    # Auto-load on first show
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if not self._initial_load_done:
+            self._initial_load_done = True
+            QTimer.singleShot(800, lambda: self._fire_browse("", "", "", 1))
+
+    # ------------------------------------------------------------------
+    # Core browse dispatcher
+    # ------------------------------------------------------------------
+
+    def _fire_browse(self, query: str, category: str, version: str, page: int) -> None:
+        """Start a new browse/search worker, cancelling any running one."""
+        for w in (self._search_worker, self._browse_worker):
+            if w is not None and w.isRunning():
+                w.quit()
+
+        self._current_query    = query
+        self._current_category = category
+        self._current_version  = version
+        self._current_page     = page
+        self._request_token   += 1
+        token = self._request_token
+
+        self._show_grid_status("Loading\u2026")
+
+        if query:
+            worker = SearchWorker(
+                query, category=category, version=version, page=page,
+                token=token, parent=self,
+            )
+            self._search_worker = worker
+        else:
+            worker = CategoryBrowseWorker(
+                category, version=version, page=page,
+                token=token, parent=self,
+            )
+            self._browse_worker = worker
+
+        worker.result.connect(self._on_search_result)
+        worker.error.connect(lambda e: self._show_grid_status(f"Error: {e}"))
+        worker.start()
+
+    # ------------------------------------------------------------------
+    # Grid helpers
+    # ------------------------------------------------------------------
+
+    def _clear_grid(self) -> None:
+        """Remove all widgets from the browse grid."""
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _show_grid_status(self, msg: str) -> None:
+        """Clear grid and show a centred status label spanning both columns."""
+        self._clear_grid()
+        lbl = QLabel(msg)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setObjectName("modMeta")
+        self._grid_layout.addWidget(lbl, 0, 0, 1, 2)
+        self._grid_layout.setRowStretch(0, 0)
+        self._grid_layout.setRowStretch(1, 1)
+
+    def _populate_grid(self, results: list) -> None:
+        """Fill the browse grid with ModBrowseCard widgets."""
+        self._clear_grid()
+        if not results:
+            self._show_grid_status("No mods found.")
+            return
+        for i, entry in enumerate(results):
+            row, col = divmod(i, 2)
+            card = ModBrowseCard(entry, parent=self._grid_container)
+            card.clicked.connect(self._on_card_clicked)
+            self._grid_layout.addWidget(card, row, col)
+        # Trailing stretch so cards don't expand vertically
+        last_row = (len(results) - 1) // 2 + 1
+        self._grid_layout.setRowStretch(last_row, 1)
+        self._grid_scroll.verticalScrollBar().setValue(0)
+
+    def _update_pagination_ui(self) -> None:
+        self._page_lbl.setText(f"Page {self._current_page} of {self._total_pages}")
+        self._prev_btn.setEnabled(self._current_page > 1)
+        self._next_btn.setEnabled(self._current_page < self._total_pages)
+
+    # ------------------------------------------------------------------
+    # Category chip handler
+    # ------------------------------------------------------------------
 
     def _on_category_selected(self, category: str) -> None:
         """Fire a portal browse query for the selected category chip."""
-        if self._browse_worker is not None and self._browse_worker.isRunning():
-            self._browse_worker.quit()
-        # Clear URL bar silently so it's obvious the category is driving the browse
+        # Clear URL bar silently when browsing by category
         self.url_edit.blockSignals(True)
         self.url_edit.clear()
         self.url_edit.blockSignals(False)
-        # Reset any loaded mod detail
         self._reset_mod_detail()
-        worker = CategoryBrowseWorker(category, parent=self)
-        self._browse_worker = worker
-        worker.result.connect(self._on_search_result)
-        worker.error.connect(lambda e: self._notify(f"Category browse failed: {e}", "error"))
-        self.search_results_list.clear()
-        placeholder = QListWidgetItem("Loading\u2026")
-        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
-        self.search_results_list.addItem(placeholder)
-        worker.start()
+        self._fire_browse("", category, self._current_version, 1)
+
+    def _on_version_selected(self, version: str) -> None:
+        """Re-fire current browse/search with the new version filter."""
+        query = self.url_edit.text().strip()
+        if query and not query.startswith("http") and "mods.factorio.com" not in query:
+            self._fire_browse(query, "", version, 1)
+        else:
+            self._fire_browse("", self._current_category, version, 1)
 
     # ------------------------------------------------------------------
     # URL / search handlers
@@ -526,7 +728,8 @@ class DownloaderTab(QWidget):
         self._search_timer.stop()
         stripped = text.strip()
         if not stripped:
-            self._show_results_placeholder()
+            # Revert to category browse
+            self._fire_browse("", self._current_category, self._current_version, 1)
             self._reset_mod_detail()
             return
         # Skip live search when the field already contains a full URL
@@ -542,53 +745,43 @@ class DownloaderTab(QWidget):
         if not query:
             return
         self._notify("Searching mods...", event_key="search_running")
-        # Show placeholder immediately so the user knows something is happening
-        self.search_results_list.clear()
-        placeholder = QListWidgetItem("Searching\u2026")
-        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
-        self.search_results_list.addItem(placeholder)
-        self.search_results_list.setVisible(True)
+        self._fire_browse(query, "", self._current_version, 1)
 
-        worker = SearchWorker(query, parent=self)
-        self._search_worker = worker
-        worker.result.connect(self._on_search_result)
-        worker.error.connect(lambda _e: self._show_results_placeholder())
-        worker.start()
-
-    @Slot(list)
-    def _on_search_result(self, results: list):
-        self.search_results_list.clear()
-        if not results:
-            self._show_results_placeholder()
-            self._search_worker = None
-            self._browse_worker = None
+    @Slot(list, int, int, int)
+    def _on_search_result(self, results: list, token: int, page: int, total_pages: int):
+        if token != self._request_token:
             return
-        for entry in results:
-            name    = entry.get("name", "")
-            title   = entry.get("title") or name
-            author  = entry.get("owner", "")
-            dl      = entry.get("downloads_count", 0)
-            display = title if name.lower() in title.lower() else f"{title}  ({name})"
-            if author:
-                display += f"  by {author}"
-            if dl:
-                display += f"  \u00b7 {dl:,}\u2193"
-            item = QListWidgetItem(display)
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            self.search_results_list.addItem(item)
+        self._current_page  = page
+        self._total_pages   = total_pages
         self._search_worker = None
         self._browse_worker = None
+        self._update_pagination_ui()
+        self._populate_grid(results)
 
-    def _on_result_selected(self, item: QListWidgetItem):
-        mod_name = item.data(Qt.ItemDataRole.UserRole)
-        if not mod_name:
-            return
-        # Block textChanged so the debounce timer doesn't re-trigger search
+    def _on_card_clicked(self, mod_name: str) -> None:
+        """Handle card click: populate right panel with mod detail."""
         self.url_edit.blockSignals(True)
         self.url_edit.setText(f"https://mods.factorio.com/mod/{mod_name}")
         self.url_edit.blockSignals(False)
-        # Automatically load the mod detail into the right panel
         self._on_load_mod()
+
+    # ------------------------------------------------------------------
+    # Pagination
+    # ------------------------------------------------------------------
+
+    def _on_prev_page(self) -> None:
+        if self._current_page > 1:
+            self._fire_browse(
+                self._current_query, self._current_category,
+                self._current_version, self._current_page - 1,
+            )
+
+    def _on_next_page(self) -> None:
+        if self._current_page < self._total_pages:
+            self._fire_browse(
+                self._current_query, self._current_category,
+                self._current_version, self._current_page + 1,
+            )
 
     def _on_load_mod(self):
         url = self.url_edit.text().strip()

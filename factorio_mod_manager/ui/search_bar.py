@@ -37,7 +37,7 @@ class PortalSearchWorker(QThread):
     def run(self) -> None:
         try:
             portal = FactorioPortalAPI()
-            results = portal.search_mods(self._query, limit=8)
+            results, _, _ = portal.search_mods(self._query, limit=8)
             self.result.emit(results)
         except PortalAPIError as exc:
             self.error.emit(str(exc))

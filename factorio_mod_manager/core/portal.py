@@ -242,34 +242,140 @@ class FactorioPortalAPI:
             print(f"Error parsing mod {mod_name}: {e}")
             return None
 
-    def search_mods(self, query: str, limit: int = 10, category: str = "") -> List[Dict[str, Any]]:
+    def search_mods(
+        self,
+        query: str,
+        limit: int = 20,
+        category: str = "",
+        version: str = "",
+        page: int = 1,
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
         """
         Search for mods on the portal.
-        
+
+        The portal's q= and tag= URL parameters are non-functional (they return
+        all mods sorted by name regardless of value).
+
+        Fast path (no query, no category): uses server-side pagination so every
+        page of "recently updated" mods can be browsed cheaply.
+
+        Client-side path (text query OR category filter): fetches up to 200
+        recently-updated mods, applies category filter + text ranking, and
+        slices the requested page from the ranked pool.  An extra namelist=
+        lookup supplements exact name matches that might not appear in the
+        recent-200 window.
+
         Args:
-            query: Search query
-            limit: Maximum results to return
-            category: Optional category tag to filter results
-            
+            query:    Search query (empty string for browse mode).
+            limit:    Results per page (default 20).
+            category: Portal category value (e.g. "content", "overhaul").
+                      Empty string means no filter.
+            version:  Factorio version filter ("2.0", "1.1", or "" for all).
+            page:     1-based page number.
+
         Returns:
-            List of mod dictionaries
+            Tuple of (results, current_page, total_pages).
         """
+        page = max(1, page)
         try:
-            params = {"q": query, "page_size": max(limit, 50)}
-            if category:
-                params["tag"] = category
-            response = self.session.get(
-                f"{self.API_URL}",
-                params=params,
-                timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("results", [])[:limit]
+            # ------------------------------------------------------------------
+            # Fast path: pure browse (no text query, no category filter)
+            # ------------------------------------------------------------------
+            if not query and not category:
+                params: Dict[str, Any] = {
+                    "sort": "updated_at",
+                    "sort_order": "desc",
+                    "hide_deprecated": "true",
+                    "page_size": limit,
+                    "page": page,
+                }
+                if version:
+                    params["version"] = version
+                resp = self.session.get(self.API_URL, params=params, timeout=15)
+                if resp.status_code != 200:
+                    return [], 1, 1
+                body = resp.json()
+                results: List[Dict[str, Any]] = body.get("results", [])
+                pag = body.get("pagination", {})
+                current_page = pag.get("page", page)
+                total_pages  = pag.get("page_count", 1)
+                return results, current_page, max(1, total_pages)
+
+            # ------------------------------------------------------------------
+            # Client-side path: fetch pool, filter, rank, paginate
+            # ------------------------------------------------------------------
+            # "No category" mods are old/unmaintained — they sit at the tail of
+            # the updated_at-desc list.  Flip to asc so we actually find them.
+            sort_order = "asc" if category == "__no_category__" else "desc"
+            pool_params: Dict[str, Any] = {
+                "sort": "updated_at",
+                "sort_order": sort_order,
+                "hide_deprecated": "true",
+                "page_size": 200,
+            }
+            if version:
+                pool_params["version"] = version
+            resp = self.session.get(self.API_URL, params=pool_params, timeout=15)
+            if resp.status_code != 200:
+                return [], 1, 1
+            pool: List[Dict[str, Any]] = resp.json().get("results", [])
+
+            # Category filter
+            if category == "__no_category__":
+                pool = [r for r in pool if not r.get("category")]
+            elif category:
+                pool = [r for r in pool if r.get("category", "") == category]
+
+            # Text ranking
+            if query:
+                q = query.lower()
+
+                def _rank(entry: Dict[str, Any]) -> tuple:
+                    name  = (entry.get("name")    or "").lower()
+                    title = (entry.get("title")   or "").lower()
+                    summ  = (entry.get("summary") or "").lower()
+                    score = -(entry.get("score") or 0)
+                    if name == q:            return (0, score)
+                    if title == q:           return (1, score)
+                    if name.startswith(q):   return (2, score)
+                    if title.startswith(q):  return (3, score)
+                    if q in name:            return (4, score)
+                    if q in title:           return (5, score)
+                    if q in summ:            return (6, score)
+                    return (99, 0)
+
+                ranked  = [(r, _rank(r)) for r in pool]
+                matched = [(r, k) for r, k in ranked if k[0] < 99]
+                matched.sort(key=lambda x: x[1])
+                pool = [r for r, _ in matched]
+
+                # Supplement with exact name match (catches mods outside recent-200)
+                try:
+                    nr = self.session.get(
+                        self.API_URL, params={"namelist": query}, timeout=8
+                    )
+                    if nr.status_code == 200:
+                        existing = {r["name"] for r in pool}
+                        new_exact = [
+                            r for r in nr.json().get("results", [])
+                            if r["name"] not in existing
+                        ]
+                        pool = new_exact + pool
+                except Exception:
+                    pass
+            else:
+                # Browse+category mode: rank by community score
+                pool.sort(key=lambda x: -(x.get("score") or 0))
+
+            # Paginate the ranked pool
+            total_pages = max(1, (len(pool) + limit - 1) // limit)
+            page        = min(page, total_pages)
+            start       = (page - 1) * limit
+            return pool[start : start + limit], page, total_pages
+
         except Exception as e:
             print(f"Error searching for mods: {e}")
-        
-        return []
+        return [], 1, 1
 
     def get_mod_changelog(self, mod_name: str) -> Dict[str, Any]:
         """
