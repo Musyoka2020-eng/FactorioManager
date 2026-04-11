@@ -180,3 +180,11 @@ class CategoryChipsBar(QWidget):
         btn.style().unpolish(btn)
         btn.style().polish(btn)
         self._active_chip = btn
+
+    def select_chip(self, category: str) -> None:
+        """Programmatically activate the chip matching *category* without emitting the signal."""
+        for i in range(self._chips_layout.count()):
+            widget = self._chips_layout.itemAt(i).widget()
+            if isinstance(widget, QPushButton) and widget.text() == category:
+                self._set_active(widget)
+                return

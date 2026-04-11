@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTextEdit,
@@ -65,7 +64,7 @@ class DownloadWorker(QThread):
                         f"Downloading: {completed}/{total} mods ({pct}%)", "INFO"
                     )
 
-            def _on_mod_status(mod_name, status):
+            def _on_mod_status(mod_name, status, pct=None):
                 self.mod_status.emit(mod_name, status)
 
             downloader.set_overall_progress_callback(_on_progress)
@@ -209,7 +208,6 @@ class DownloaderTab(QWidget):
         self._resolve_worker = None      # keeps ResolveWorker alive until done
         self._active_worker  = None      # keeps DownloadWorker alive until done
         self._browse_worker  = None      # keeps CategoryBrowseWorker alive until done
-        self._sidebar_labels: Dict[str, QLabel] = {}  # mod_name -> status QLabel
         self._setup_ui()
         self._restore_config()
 
@@ -265,65 +263,81 @@ class DownloaderTab(QWidget):
         header_layout.addWidget(self.download_btn_header)
         root.addWidget(header)
 
-        # Body splitter: staged workflow + side panel
+        # Body splitter: browse panel (left) + detail/download panel (right)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(1)
         root.addWidget(splitter, stretch=1)
 
-        # Left column: staged flow
+        # ── LEFT COLUMN: browse ────────────────────────────────────────
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(16, 16, 8, 16)
-        left_layout.setSpacing(12)
+        left_layout.setSpacing(8)
 
-        # Category chips bar — portal browse by category
-        self._chips_bar = CategoryChipsBar()
-        self._chips_bar.category_selected.connect(self._on_category_selected)
-        left_layout.addWidget(self._chips_bar)
-
-        # Stage 1: URL input and search
-        self._stage1_widget = QWidget()
-        s1_layout = QVBoxLayout(self._stage1_widget)
-        s1_layout.setContentsMargins(0, 0, 0, 0)
-        s1_layout.setSpacing(8)
-
+        # 1. Search / URL input row
         url_row = QHBoxLayout()
+        url_row.setSpacing(8)
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(
-            "Enter mod URL or name (e.g. https://mods.factorio.com/mod/…)"
+            "Search by name or paste URL (e.g. https://mods.factorio.com/mod/…)"
         )
         self.url_edit.textChanged.connect(self._on_url_changed)
         self.load_btn = QPushButton("Load Mod")
         self.load_btn.clicked.connect(self._on_load_mod)
         url_row.addWidget(self.url_edit, stretch=1)
         url_row.addWidget(self.load_btn)
-        s1_layout.addLayout(url_row)
+        left_layout.addLayout(url_row)
 
+        # 2. Category chips (always visible below the search bar)
+        self._chips_bar = CategoryChipsBar()
+        self._chips_bar.category_selected.connect(self._on_category_selected)
+        left_layout.addWidget(self._chips_bar)
+
+        # 3. Results list — always visible, expands to fill remaining space
         self.search_results_list = QListWidget()
-        self.search_results_list.setMaximumHeight(160)
-        self.search_results_list.setVisible(False)
+        self.search_results_list.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.search_results_list.itemClicked.connect(self._on_result_selected)
-        s1_layout.addWidget(self.search_results_list)
-        left_layout.addWidget(self._stage1_widget)
+        self._show_results_placeholder()
+        left_layout.addWidget(self.search_results_list, stretch=1)
 
-        # Stage 2: mod details and dependencies
-        self._stage2_widget = QWidget()
-        self._stage2_widget.setVisible(False)
-        s2_layout = QVBoxLayout(self._stage2_widget)
-        s2_layout.setContentsMargins(0, 0, 0, 0)
-        s2_layout.setSpacing(8)
+        splitter.addWidget(left_widget)
+        splitter.setStretchFactor(0, 1)
 
-        self.info_panel = QFrame()
-        self.info_panel.setObjectName("infoCard")
-        info_vbox = QVBoxLayout(self.info_panel)
-        info_vbox.setContentsMargins(12, 10, 12, 10)
-        info_vbox.setSpacing(4)
+        # ── RIGHT PANEL: detail + download workflow ────────────────────
+        right_frame = QFrame()
+        right_frame.setObjectName("sidePanel")
+        right_frame.setFixedWidth(SIDE_PANEL_WIDTH)
+        right_layout = QVBoxLayout(right_frame)
+        right_layout.setContentsMargins(8, 12, 8, 8)
+        right_layout.setSpacing(6)
+
+        side_hdr = QLabel("Selected Mod")
+        side_hdr.setObjectName("depsHeader")
+        right_layout.addWidget(side_hdr)
+
+        # Empty-state placeholder
+        self._no_mod_lbl = QLabel("Search for a mod or paste\na URL to get started.")
+        self._no_mod_lbl.setObjectName("modMeta")
+        self._no_mod_lbl.setWordWrap(True)
+        self._no_mod_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right_layout.addWidget(self._no_mod_lbl)
+
+        # Mod detail card (hidden until a mod is resolved)
+        self._mod_card = QFrame()
+        self._mod_card.setObjectName("infoCard")
+        self._mod_card.setVisible(False)
+        card_vbox = QVBoxLayout(self._mod_card)
+        card_vbox.setContentsMargins(10, 8, 10, 8)
+        card_vbox.setSpacing(4)
 
         title_row = QHBoxLayout()
         self.info_title_lbl = QLabel("")
         self.info_title_lbl.setObjectName("modTitle")
         self.info_title_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.info_title_lbl.setWordWrap(True)
         self.info_author_lbl = QLabel("")
         self.info_author_lbl.setObjectName("modAuthor")
         self.info_author_lbl.setTextFormat(Qt.TextFormat.PlainText)
@@ -332,31 +346,30 @@ class DownloaderTab(QWidget):
         )
         title_row.addWidget(self.info_title_lbl, stretch=1)
         title_row.addWidget(self.info_author_lbl)
-        info_vbox.addLayout(title_row)
+        card_vbox.addLayout(title_row)
 
         self.info_meta_lbl = QLabel("")
         self.info_meta_lbl.setObjectName("modMeta")
         self.info_meta_lbl.setTextFormat(Qt.TextFormat.PlainText)
-        info_vbox.addWidget(self.info_meta_lbl)
+        card_vbox.addWidget(self.info_meta_lbl)
 
         self.info_summary_lbl = QLabel("")
         self.info_summary_lbl.setObjectName("modSummary")
         self.info_summary_lbl.setTextFormat(Qt.TextFormat.PlainText)
         self.info_summary_lbl.setWordWrap(True)
         self.info_summary_lbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        info_vbox.addWidget(self.info_summary_lbl)
+        card_vbox.addWidget(self.info_summary_lbl)
 
         self._dep_divider = QFrame()
         self._dep_divider.setObjectName("depDivider")
         self._dep_divider.setFrameShape(QFrame.Shape.HLine)
-        info_vbox.addWidget(self._dep_divider)
+        card_vbox.addWidget(self._dep_divider)
 
         self.deps_hdr = QLabel("Dependencies")
         self.deps_hdr.setObjectName("depsHeader")
-        info_vbox.addWidget(self.deps_hdr)
+        card_vbox.addWidget(self.deps_hdr)
 
         self.deps_required_lbl = QLabel("")
         self.deps_optional_lbl = QLabel("")
@@ -371,61 +384,47 @@ class DownloaderTab(QWidget):
             dep_lbl.setWordWrap(True)
             dep_lbl.setTextFormat(Qt.TextFormat.PlainText)
             dep_lbl.setVisible(False)
-            info_vbox.addWidget(dep_lbl)
+            card_vbox.addWidget(dep_lbl)
 
         self.deps_required_lbl.setProperty("depType", "required")
         self.deps_optional_lbl.setProperty("depType", "optional")
         self.deps_base_lbl.setProperty("depType", "base")
         self.deps_incompat_lbl.setProperty("depType", "incompatible")
 
-        s2_layout.addWidget(self.info_panel)
+        right_layout.addWidget(self._mod_card)
 
+        # Options + download controls (always present; enabled once mod is loaded)
         self.optional_checkbox = QCheckBox("Include optional dependencies")
-        s2_layout.addWidget(self.optional_checkbox)
-
-        self.confirm_btn = QPushButton("Confirm Mod →")
-        self.confirm_btn.clicked.connect(self._advance_to_stage_3)
-        s2_layout.addWidget(self.confirm_btn)
-
-        left_layout.addWidget(self._stage2_widget)
-
-        # Stage 3: folder + download
-        self._stage3_widget = QWidget()
-        self._stage3_widget.setVisible(False)
-        s3_layout = QVBoxLayout(self._stage3_widget)
-        s3_layout.setContentsMargins(0, 0, 0, 0)
-        s3_layout.setSpacing(8)
+        self.optional_checkbox.setEnabled(False)
+        right_layout.addWidget(self.optional_checkbox)
 
         folder_row = QHBoxLayout()
-        folder_label = QLabel("Mods Folder:")
+        folder_label = QLabel("Folder:")
         self.folder_edit = QLineEdit()
         self.folder_edit.setReadOnly(True)
-        self.folder_edit.setPlaceholderText("Select your Factorio mods folder…")
+        self.folder_edit.setPlaceholderText("Select mods folder…")
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._on_browse)
         folder_row.addWidget(folder_label)
         folder_row.addWidget(self.folder_edit, stretch=1)
         folder_row.addWidget(browse_btn)
-        s3_layout.addLayout(folder_row)
+        right_layout.addLayout(folder_row)
 
         self.download_btn = QPushButton("Download Mods")
         self.download_btn.setObjectName("accentButton")
         self.download_btn.setEnabled(False)
         self.download_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.download_btn.clicked.connect(self._on_download)
-        s3_layout.addWidget(self.download_btn)
+        right_layout.addWidget(self.download_btn)
 
-        left_layout.addWidget(self._stage3_widget)
-
-        # Progress area
+        # Progress area (hidden until download starts)
         self._progress_widget = QWidget()
         self._progress_widget.setVisible(False)
         prog_layout = QVBoxLayout(self._progress_widget)
         prog_layout.setContentsMargins(0, 0, 0, 0)
-        prog_layout.setSpacing(8)
+        prog_layout.setSpacing(6)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -438,38 +437,7 @@ class DownloaderTab(QWidget):
         self.console.setPlaceholderText("Download progress will appear here…")
         prog_layout.addWidget(self.console, stretch=1)
 
-        left_layout.addWidget(self._progress_widget)
-        self._progress_widget.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
-        )
-
-        splitter.addWidget(left_widget)
-        splitter.setStretchFactor(0, 1)
-
-        # Right column: contextual side panel
-        right_frame = QFrame()
-        right_frame.setObjectName("sidePanel")
-        right_frame.setFixedWidth(SIDE_PANEL_WIDTH)
-        right_layout = QVBoxLayout(right_frame)
-        right_layout.setContentsMargins(8, 12, 8, 8)
-        right_layout.setSpacing(4)
-
-        side_hdr = QLabel("Selected Mod")
-        side_hdr.setObjectName("depsHeader")
-        right_layout.addWidget(side_hdr)
-
-        self._sidebar_scroll = QScrollArea()
-        self._sidebar_scroll.setWidgetResizable(True)
-        self._sidebar_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._sidebar_inner = QWidget()
-        self._sidebar_layout = QVBoxLayout(self._sidebar_inner)
-        self._sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        self._sidebar_layout.setSpacing(4)
-        self._sidebar_layout.addStretch()
-        self._sidebar_scroll.setWidget(self._sidebar_inner)
-        right_layout.addWidget(self._sidebar_scroll, stretch=1)
+        right_layout.addWidget(self._progress_widget, stretch=1)
 
         splitter.addWidget(right_frame)
         splitter.setStretchFactor(1, 0)
@@ -484,39 +452,6 @@ class DownloaderTab(QWidget):
         saved = config.get("mods_folder", "")
         if saved:
             self.folder_edit.setText(str(saved))
-
-    # ------------------------------------------------------------------
-    # Sidebar helpers
-    # ------------------------------------------------------------------
-
-    def _clear_sidebar(self):
-        """Remove all per-mod rows from sidebar; clear label map."""
-        self._sidebar_labels.clear()
-        layout = self._sidebar_layout
-        # Remove all items except the trailing addStretch()
-        while layout.count() > 1:
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-    def _add_sidebar_row(self, mod_name, status_text="Preparing..."):
-        """Add/update a per-mod sidebar row. Returns the status QLabel."""
-        row_widget = QWidget()
-        row_layout = QHBoxLayout(row_widget)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        name_label = QLabel(mod_name)
-        name_label.setProperty("sidebarRole", "name")
-        name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        status_label = QLabel(status_text)
-        status_label.setProperty("sidebarRole", "status")
-        status_label.setProperty("statusState", status_text)
-        row_layout.addWidget(name_label)
-        row_layout.addWidget(status_label)
-        # Insert before the trailing stretch
-        insert_at = self._sidebar_layout.count() - 1
-        self._sidebar_layout.insertWidget(insert_at, row_widget)
-        self._sidebar_labels[mod_name] = status_label
-        return status_label
 
     # ------------------------------------------------------------------
     # Progress console
@@ -534,10 +469,23 @@ class DownloaderTab(QWidget):
     # Category chip handler
     # ------------------------------------------------------------------
 
+    def _show_results_placeholder(self) -> None:
+        """Show browse hint in results list when no results are loaded."""
+        self.search_results_list.clear()
+        item = QListWidgetItem("Browse by category above or type a mod name to search…")
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.search_results_list.addItem(item)
+
     def _on_category_selected(self, category: str) -> None:
         """Fire a portal browse query for the selected category chip."""
         if self._browse_worker is not None and self._browse_worker.isRunning():
             self._browse_worker.quit()
+        # Clear URL bar silently so it's obvious the category is driving the browse
+        self.url_edit.blockSignals(True)
+        self.url_edit.clear()
+        self.url_edit.blockSignals(False)
+        # Reset any loaded mod detail
+        self._reset_mod_detail()
         worker = CategoryBrowseWorker(category, parent=self)
         self._browse_worker = worker
         worker.result.connect(self._on_search_result)
@@ -546,7 +494,6 @@ class DownloaderTab(QWidget):
         placeholder = QListWidgetItem("Loading\u2026")
         placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
         self.search_results_list.addItem(placeholder)
-        self.search_results_list.setVisible(True)
         worker.start()
 
     # ------------------------------------------------------------------
@@ -557,13 +504,14 @@ class DownloaderTab(QWidget):
         self._search_timer.stop()
         stripped = text.strip()
         if not stripped:
-            self.search_results_list.setVisible(False)
-            self.info_panel.setVisible(False)
-            self._reset_stages()
+            self._show_results_placeholder()
+            self._reset_mod_detail()
             return
-        # Skip live search when the field already contains a URL
+        # Skip live search when the field already contains a full URL
         if stripped.startswith("http") or "mods.factorio.com" in stripped:
             return
+        # Reset category chips to "All" when the user is typing a search term
+        self._chips_bar.select_chip("All")
         self._search_timer.start()
 
     def _perform_search(self):
@@ -582,15 +530,16 @@ class DownloaderTab(QWidget):
         worker = SearchWorker(query, parent=self)
         self._search_worker = worker
         worker.result.connect(self._on_search_result)
-        worker.error.connect(lambda _e: self.search_results_list.setVisible(False))
+        worker.error.connect(lambda _e: self._show_results_placeholder())
         worker.start()
 
     @Slot(list)
     def _on_search_result(self, results: list):
         self.search_results_list.clear()
         if not results:
-            self.search_results_list.setVisible(False)
+            self._show_results_placeholder()
             self._search_worker = None
+            self._browse_worker = None
             return
         for entry in results:
             name    = entry.get("name", "")
@@ -605,17 +554,18 @@ class DownloaderTab(QWidget):
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, name)
             self.search_results_list.addItem(item)
-        self.search_results_list.setVisible(True)
         self._search_worker = None
+        self._browse_worker = None
 
     def _on_result_selected(self, item: QListWidgetItem):
         mod_name = item.data(Qt.ItemDataRole.UserRole)
+        if not mod_name:
+            return
         # Block textChanged so the debounce timer doesn't re-trigger search
         self.url_edit.blockSignals(True)
         self.url_edit.setText(f"https://mods.factorio.com/mod/{mod_name}")
         self.url_edit.blockSignals(False)
-        self.search_results_list.setVisible(False)
-        # Automatically load the mod info panel
+        # Automatically load the mod detail into the right panel
         self._on_load_mod()
 
     def _on_load_mod(self):
@@ -624,8 +574,6 @@ class DownloaderTab(QWidget):
             self._notify("Please enter a mod URL or name.", "error")
             return
         self._notify("Resolving mod details...", event_key="mod_resolve")
-        self.search_results_list.setVisible(False)
-        self.info_panel.setVisible(False)
         self.load_btn.setEnabled(False)
         worker = ResolveWorker(url, parent=self)
         self._resolve_worker = worker
@@ -682,7 +630,8 @@ class DownloaderTab(QWidget):
         self.deps_hdr.setVisible(any_deps)
         self._dep_divider.setVisible(any_deps)
 
-        self.info_panel.setVisible(True)
+        self._mod_card.setVisible(True)
+        self._no_mod_lbl.setVisible(False)
         self._resolve_worker = None
 
     @Slot(object)
@@ -691,26 +640,23 @@ class DownloaderTab(QWidget):
 
     @Slot(object)
     def _advance_to_stage_2(self, mod_info: object) -> None:
-        """Show mod details panel and enable download header button (Stage 2)."""
+        """Populate mod detail card in right panel and enable download."""
         self._populate_mod_info(mod_info)
-        self._stage2_widget.setVisible(True)
+        self._mod_card.setVisible(True)
+        self._no_mod_lbl.setVisible(False)
+        self.optional_checkbox.setEnabled(True)
+        self.download_btn.setEnabled(True)
         self.download_btn_header.setEnabled(True)
-        # Restore folder from config so Stage 3 is ready when shown
         self._restore_config()
 
-    def _advance_to_stage_3(self) -> None:
-        """Show download config panel (Stage 3)."""
-        self._stage3_widget.setVisible(True)
-        self.download_btn.setEnabled(True)
-
-    def _reset_stages(self) -> None:
-        """Reset staged flow back to Stage 1."""
-        self._stage2_widget.setVisible(False)
-        self._stage3_widget.setVisible(False)
-        self._progress_widget.setVisible(False)
-        self.download_btn_header.setEnabled(False)
+    def _reset_mod_detail(self) -> None:
+        """Hide mod detail card and disable download controls."""
+        self._mod_card.setVisible(False)
+        self._no_mod_lbl.setVisible(True)
+        self.optional_checkbox.setEnabled(False)
         self.download_btn.setEnabled(False)
-        self._clear_sidebar()
+        self.download_btn_header.setEnabled(False)
+        self._progress_widget.setVisible(False)
 
     @Slot(str)
     def _on_resolve_error(self, error_msg: str) -> None:
@@ -784,8 +730,7 @@ class DownloaderTab(QWidget):
             self._notify("You appear to be offline.", "error")
             return
 
-        # Reset UI
-        self.search_results_list.setVisible(False)
+        # Reset download UI
         self.download_btn.setEnabled(False)
         self.download_btn_header.setEnabled(False)
         self._progress_widget.setVisible(True)
@@ -794,7 +739,6 @@ class DownloaderTab(QWidget):
         self.progress_bar.style().unpolish(self.progress_bar)
         self.progress_bar.style().polish(self.progress_bar)
         self.console.clear()
-        self._clear_sidebar()
 
         include_optional = self.optional_checkbox.isChecked()
         worker = DownloadWorker(url, folder, include_optional, parent=self)
@@ -821,12 +765,7 @@ class DownloaderTab(QWidget):
 
     @Slot(str, str)
     def _on_mod_status(self, mod_name, status_text):
-        if mod_name in self._sidebar_labels:
-            label = self._sidebar_labels[mod_name]
-            label.setText(status_text)
-            label.setProperty("statusState", status_text)
-        else:
-            self._add_sidebar_row(mod_name, status_text)
+        self._append_console(f"{mod_name}: {status_text}", "INFO")
 
     @Slot(bool, list)
     def _on_download_finished(self, all_succeeded, failed):
