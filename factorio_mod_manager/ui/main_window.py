@@ -5,7 +5,7 @@ import logging
 from queue import Queue
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -20,6 +20,10 @@ from PySide6.QtWidgets import (
 )
 
 from .status_manager import StatusManager
+from .settings_page import SettingsPage
+from .search_bar import GlobalSearchBar
+from .mod_details_dialog import ModDetailsDialog
+from .styles import load_and_apply_theme
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +81,12 @@ class MainWindow(QMainWindow):
         # Launch maximized (D-13)
         self.showMaximized()
 
+        # System theme auto-switch on OS palette change
+        from PySide6.QtWidgets import QApplication as _QApp
+        _app = _QApp.instance()
+        if _app is not None:
+            _app.paletteChanged.connect(self._on_palette_changed)
+
     def _create_header(self, root_layout: QVBoxLayout) -> None:
         """Create app header with title, subtitle, and accent separator."""
         header_widget = QWidget()
@@ -102,7 +112,16 @@ class MainWindow(QMainWindow):
 
         title_row.addWidget(title_label)
         title_row.addStretch()
-        title_row.addWidget(subtitle_label)
+        # Utility zone: global search bar + settings shortcut button
+        self._global_search_bar = GlobalSearchBar(self, parent=header_widget)
+        title_row.addWidget(self._global_search_bar)
+
+        settings_btn = QPushButton("\u2699")
+        settings_btn.setObjectName("settingsButton")
+        settings_btn.setFixedSize(32, 32)
+        settings_btn.setToolTip("Settings")
+        settings_btn.clicked.connect(lambda: self._navigate_to_page(3))
+        title_row.addWidget(settings_btn)
         header_layout.addLayout(title_row)
 
         # Separator — QFrame#headerSeparator (QSS applies 1px accent color)
@@ -133,6 +152,7 @@ class MainWindow(QMainWindow):
             ("⬇  Downloader", 0),
             ("✓  Checker & Updates", 1),
             ("📋  Logs", 2),
+            ("\u2699  Settings", 3),
         ]
 
         for label, idx in nav_items:
@@ -141,7 +161,7 @@ class MainWindow(QMainWindow):
             btn.setCheckable(True)
             btn.setFlat(True)
             btn.toggled.connect(
-                lambda checked, i=idx: self.page_host.setCurrentIndex(i) if checked else None
+                lambda checked, i=idx: self._on_nav_changed(i) if checked else None
             )
             self._nav_group.addButton(btn, idx)
             layout.addWidget(btn)
@@ -205,10 +225,116 @@ class MainWindow(QMainWindow):
             QVBoxLayout(placeholder).addWidget(QLabel("Logs (no log queue provided)"))
             self.page_host.addWidget(placeholder)
 
+        # Settings page (index 3)
+        self._settings_page = SettingsPage(self)
+        self._settings_page.settings_saved.connect(self._on_settings_saved)
+        self._settings_page.cancel_requested.connect(self._on_settings_cancel)
+        self.page_host.addWidget(self._settings_page)  # index 3
+        self._prev_page_idx: int = 0
+
+        # Cross-widget signal connections
+        if hasattr(self, "checker_tab") and hasattr(self, "_global_search_bar"):
+            self.checker_tab.mods_loaded.connect(self._global_search_bar.set_installed_mods)
+        if hasattr(self, "_global_search_bar"):
+            self._global_search_bar.result_selected.connect(self._on_search_result_selected)
+
         # Activate first nav item and show first page
         first_btn = self._nav_group.button(0)
         if first_btn:
             first_btn.setChecked(True)
+
+    # ------------------------------------------------------------------
+    # Navigation helpers
+    # ------------------------------------------------------------------
+
+    def _on_nav_changed(self, index: int) -> None:
+        """Central navigation handler; guards against leaving Settings with unsaved changes."""
+        current = self.page_host.currentIndex()
+        if current == 3 and index != 3 and self._settings_page.has_unsaved_changes():
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "You have unsaved settings changes. Save before leaving?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Save:
+                self._settings_page._on_save()
+            elif reply == QMessageBox.StandardButton.Cancel:
+                # Restore Settings button without re-triggering guard
+                settings_btn = self._nav_group.button(3)
+                if settings_btn:
+                    settings_btn.blockSignals(True)
+                    settings_btn.setChecked(True)
+                    settings_btn.blockSignals(False)
+                return
+            # Discard: fall through
+        self._prev_page_idx = current
+        self.page_host.setCurrentIndex(index)
+
+    def _navigate_to_page(self, index: int) -> None:
+        """Navigate to page by checking the correct nav button."""
+        btn = self._nav_group.button(index)
+        if btn:
+            btn.setChecked(True)
+        else:
+            self._on_nav_changed(index)
+
+    # ------------------------------------------------------------------
+    # Settings page slots
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def _on_settings_saved(self) -> None:
+        """Refresh theme after SettingsPage.save() writes to config."""
+        from ..utils.config import config as _cfg
+        load_and_apply_theme(_cfg.get("theme", "dark"))
+
+    @Slot()
+    def _on_settings_cancel(self) -> None:
+        """Return to the previous page when user cancels Settings."""
+        btn = self._nav_group.button(self._prev_page_idx)
+        if btn:
+            btn.blockSignals(True)
+            btn.setChecked(True)
+            btn.blockSignals(False)
+        self.page_host.setCurrentIndex(self._prev_page_idx)
+
+    # ------------------------------------------------------------------
+    # Search result slot
+    # ------------------------------------------------------------------
+
+    @Slot(str, str)
+    def _on_search_result_selected(self, mod_name: str, source: str) -> None:
+        """Open ModDetailsDialog for a search result from the header bar."""
+        if source == "installed":
+            mods = getattr(self, "checker_tab", None)
+            mods_dict = getattr(mods, "_mods", {}) if mods else {}
+            data = mods_dict.get(mod_name)
+            if data is None:
+                return
+        else:
+            data = {"name": mod_name}
+        dialog = ModDetailsDialog(data, source, parent=self)
+        dialog.exec()
+
+    # ------------------------------------------------------------------
+    # System theme auto-switch
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def _on_palette_changed(self) -> None:
+        """Re-apply theme when OS palette changes (system theme mode only)."""
+        from ..utils.config import config as _cfg
+        if _cfg.get("theme", "dark") == "system":
+            load_and_apply_theme("system")
+
+    # ------------------------------------------------------------------
+    # Window events
+    # ------------------------------------------------------------------
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         """Reposition notification toasts when window resizes."""
