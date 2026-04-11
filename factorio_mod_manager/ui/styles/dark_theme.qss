@@ -644,6 +644,31 @@ QLabel#paginationLabel {{
     font-size: 9pt;
 }}
 
+/* ── Dependency rows ───────────────────────────────────────── */
+QLabel#depSectionHdr {{
+    color: {FG_PRIMARY};
+    font-weight: 600;
+    font-size: 9pt;
+    margin-top: 4px;
+}}
+QLabel#depRow {{
+    color: {FG_SECONDARY};
+    font-size: 9pt;
+    padding-left: 4px;
+}}
+QLabel#depRowIncompat {{
+    color: #d13438;
+    font-size: 9pt;
+    padding-left: 4px;
+}}
+QCheckBox#depOptCheckbox {{
+    color: {FG_SECONDARY};
+    font-size: 9pt;
+}}
+QCheckBox#depOptCheckbox::checked {{
+    color: {FG_PRIMARY};
+}}
+
 /* ── Phase 3: Settings Button (header utility zone) ──────── */
 QPushButton#settingsButton {{
     background-color: transparent;

@@ -295,6 +295,7 @@ class DownloaderTab(QWidget):
         self._current_page     = 1
         self._total_pages      = 1
         self._initial_load_done = False
+        self._opt_dep_checkboxes: list = []  # per-load optional dep checkboxes
         self._setup_ui()
         self._restore_config()
 
@@ -313,6 +314,7 @@ class DownloaderTab(QWidget):
             controller.queue_changed.connect(
                 lambda ops: self._queue_strip.update_from_operations(ops)
             )
+        controller.queue_changed.connect(self._on_queue_progress)
 
     def _notify(
         self,
@@ -451,19 +453,34 @@ class DownloaderTab(QWidget):
         side_hdr.setObjectName("depsHeader")
         right_layout.addWidget(side_hdr)
 
+        # ── Scrollable detail area ─────────────────────────────────────
+        self._detail_scroll = QScrollArea()
+        self._detail_scroll.setWidgetResizable(True)
+        self._detail_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._detail_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        _detail_container = QWidget()
+        _detail_vbox = QVBoxLayout(_detail_container)
+        _detail_vbox.setContentsMargins(0, 0, 4, 0)
+        _detail_vbox.setSpacing(0)
+
         # Empty-state placeholder
         self._no_mod_lbl = QLabel("Search for a mod or paste\na URL to get started.")
         self._no_mod_lbl.setObjectName("modMeta")
         self._no_mod_lbl.setWordWrap(True)
         self._no_mod_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
-        right_layout.addWidget(self._no_mod_lbl)
+        self._no_mod_lbl.setContentsMargins(4, 8, 4, 0)
+        _detail_vbox.addWidget(self._no_mod_lbl)
 
         # Mod detail card (hidden until a mod is resolved)
         self._mod_card = QFrame()
         self._mod_card.setObjectName("infoCard")
         self._mod_card.setVisible(False)
         card_vbox = QVBoxLayout(self._mod_card)
-        card_vbox.setContentsMargins(10, 8, 10, 8)
+        card_vbox.setContentsMargins(10, 8, 10, 10)
         card_vbox.setSpacing(4)
 
         title_row = QHBoxLayout()
@@ -504,33 +521,19 @@ class DownloaderTab(QWidget):
         self.deps_hdr.setObjectName("depsHeader")
         card_vbox.addWidget(self.deps_hdr)
 
-        self.deps_required_lbl = QLabel("")
-        self.deps_optional_lbl = QLabel("")
-        self.deps_base_lbl = QLabel("")
-        self.deps_incompat_lbl = QLabel("")
-        for dep_lbl in (
-            self.deps_required_lbl,
-            self.deps_optional_lbl,
-            self.deps_base_lbl,
-            self.deps_incompat_lbl,
-        ):
-            dep_lbl.setWordWrap(True)
-            dep_lbl.setTextFormat(Qt.TextFormat.PlainText)
-            dep_lbl.setVisible(False)
-            card_vbox.addWidget(dep_lbl)
+        # Dynamic deps container — cleared and rebuilt each mod load
+        self._deps_widget = QWidget()
+        self._deps_layout = QVBoxLayout(self._deps_widget)
+        self._deps_layout.setContentsMargins(0, 2, 0, 0)
+        self._deps_layout.setSpacing(2)
+        card_vbox.addWidget(self._deps_widget)
 
-        self.deps_required_lbl.setProperty("depType", "required")
-        self.deps_optional_lbl.setProperty("depType", "optional")
-        self.deps_base_lbl.setProperty("depType", "base")
-        self.deps_incompat_lbl.setProperty("depType", "incompatible")
+        _detail_vbox.addWidget(self._mod_card)
+        _detail_vbox.addStretch(1)
+        self._detail_scroll.setWidget(_detail_container)
+        right_layout.addWidget(self._detail_scroll, stretch=1)
 
-        right_layout.addWidget(self._mod_card)
-
-        # Options + download controls (always present; enabled once mod is loaded)
-        self.optional_checkbox = QCheckBox("Include optional dependencies")
-        self.optional_checkbox.setEnabled(False)
-        right_layout.addWidget(self.optional_checkbox)
-
+        # ── Fixed bottom: folder + download + queue strip + progress ──
         folder_row = QHBoxLayout()
         folder_label = QLabel("Folder:")
         self.folder_edit = QLineEdit()
@@ -562,7 +565,7 @@ class DownloaderTab(QWidget):
         self._progress_widget.setVisible(False)
         prog_layout = QVBoxLayout(self._progress_widget)
         prog_layout.setContentsMargins(0, 0, 0, 0)
-        prog_layout.setSpacing(6)
+        prog_layout.setSpacing(4)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -572,12 +575,11 @@ class DownloaderTab(QWidget):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Cascadia Code", 9))
-        self.console.setMinimumHeight(120)
+        self.console.setFixedHeight(90)
         self.console.setPlaceholderText("Download progress will appear here…")
-        prog_layout.addWidget(self.console, stretch=1)
+        prog_layout.addWidget(self.console)
 
         right_layout.addWidget(self._progress_widget)
-        right_layout.addStretch(1)
 
         splitter.addWidget(right_frame)
         splitter.setStretchFactor(0, 1)
@@ -829,21 +831,46 @@ class DownloaderTab(QWidget):
 
         # Parse and display dependencies
         req, opt, base, incompat = self._parse_deps(info)
-        for lbl, prefix, items in (
-            (self.deps_required_lbl,  "Required:",     req),
-            (self.deps_optional_lbl,  "Optional:",     opt),
-            (self.deps_base_lbl,      "Base/Game:",    base),
-            (self.deps_incompat_lbl,  "Incompatible:", incompat),
-        ):
-            if items:
-                lbl.setText(f"{prefix} {', '.join(items)}")
-                lbl.setVisible(True)
-            else:
-                lbl.setVisible(False)
+
+        # Rebuild dep rows from scratch
+        while self._deps_layout.count():
+            item = self._deps_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._opt_dep_checkboxes = []
+
+        def _dep_section(section_title, names, prefix="\u2192", obj_name="depRow"):
+            if not names:
+                return
+            hdr = QLabel(section_title)
+            hdr.setObjectName("depSectionHdr")
+            self._deps_layout.addWidget(hdr)
+            for name in names:
+                lbl = QLabel(f"  {prefix}  {name}")
+                lbl.setObjectName(obj_name)
+                lbl.setTextFormat(Qt.TextFormat.PlainText)
+                lbl.setWordWrap(True)
+                self._deps_layout.addWidget(lbl)
+
+        _dep_section("Required", req, "\u2192", "depRow")
+
+        if opt:
+            hdr = QLabel("Optional  \u2014  check to include")
+            hdr.setObjectName("depSectionHdr")
+            self._deps_layout.addWidget(hdr)
+            for name in opt:
+                cb = QCheckBox(name)
+                cb.setObjectName("depOptCheckbox")
+                self._deps_layout.addWidget(cb)
+                self._opt_dep_checkboxes.append(cb)
+
+        _dep_section("Base / Expansion", base, "\u25c6", "depRow")
+        _dep_section("Incompatible", incompat, "\u2715", "depRowIncompat")
 
         any_deps = bool(req or opt or base or incompat)
         self.deps_hdr.setVisible(any_deps)
         self._dep_divider.setVisible(any_deps)
+        self._deps_widget.setVisible(any_deps)
 
         self._mod_card.setVisible(True)
         self._no_mod_lbl.setVisible(False)
@@ -859,7 +886,6 @@ class DownloaderTab(QWidget):
         self._populate_mod_info(mod_info)
         self._mod_card.setVisible(True)
         self._no_mod_lbl.setVisible(False)
-        self.optional_checkbox.setEnabled(True)
         self.download_btn.setEnabled(True)
         self._restore_config()
 
@@ -867,7 +893,6 @@ class DownloaderTab(QWidget):
         """Hide mod detail card and disable download controls."""
         self._mod_card.setVisible(False)
         self._no_mod_lbl.setVisible(True)
-        self.optional_checkbox.setEnabled(False)
         self.download_btn.setEnabled(False)
         self._progress_widget.setVisible(False)
 
@@ -949,7 +974,7 @@ class DownloaderTab(QWidget):
             self._notify("You appear to be offline.", "error")
             return
 
-        include_optional = self.optional_checkbox.isChecked()
+        selected_optionals = [cb.text() for cb in self._opt_dep_checkboxes if cb.isChecked()]
 
         # ── Queue-backed path ──────────────────────────────────────────
         if self._queue_controller is not None:
@@ -962,7 +987,12 @@ class DownloaderTab(QWidget):
                 kind=OperationKind.DOWNLOAD,
                 label=f"Download {mod_name}",
             )
-            job = DownloadQueueJob(op, url, folder, include_optional, parent=self)
+            job = DownloadQueueJob(
+                op, url, folder,
+                include_optional=False,
+                extra_mods=selected_optionals,
+                parent=self,
+            )
             self._active_jobs[op.id] = job
 
             self._queue_controller.enqueue(op)
@@ -977,10 +1007,6 @@ class DownloaderTab(QWidget):
             self.progress_bar.style().polish(self.progress_bar)
             self.console.clear()
 
-            # Mirror queue progress into the inline console
-            self._queue_controller.queue_changed.connect(
-                lambda ops, _oid=op.id: self._on_queue_progress(ops, _oid)
-            )
             self._notify(f"Queued: Download {mod_name}", "info")
             return
 
@@ -993,7 +1019,7 @@ class DownloaderTab(QWidget):
         self.progress_bar.style().polish(self.progress_bar)
         self.console.clear()
 
-        worker = DownloadWorker(url, folder, include_optional, parent=self)
+        worker = DownloadWorker(url, folder, bool(selected_optionals), parent=self)
         self._active_worker = worker
         worker.progress.connect(self._on_progress)
         worker.mod_status.connect(self._on_mod_status)
@@ -1001,10 +1027,11 @@ class DownloaderTab(QWidget):
         worker.finished.connect(self._on_download_finished)
         worker.start()
 
-    def _on_queue_progress(self, operations: list, op_id: str) -> None:
+    @Slot(list)
+    def _on_queue_progress(self, operations: list) -> None:
         """Mirror queue-controller state into the inline progress widget."""
         for op in operations:
-            if op.id != op_id:
+            if op.id not in self._active_jobs:
                 continue
             if op.progress is not None:
                 self.progress_bar.setValue(op.progress)
@@ -1013,17 +1040,16 @@ class DownloaderTab(QWidget):
                 self.progress_bar.setProperty("completed", "true")
                 self.progress_bar.style().unpolish(self.progress_bar)
                 self.progress_bar.style().polish(self.progress_bar)
-                self._notify("✓ Download complete", "success")
+                self._notify("\u2713 Download complete", "success")
                 if self.status_manager:
                     self.status_manager.push_status("Download complete", "success")
                 # Clean up finished job reference
-                self._active_jobs.pop(op_id, None)
+                self._active_jobs.pop(op.id, None)
             elif op.state == OperationState.FAILED:
                 short = op.failure.short_description if op.failure else "Download failed"
-                self._notify(f"✗ {short}", "error")
+                self._notify(f"\u2717 {short}", "error")
                 if self.status_manager:
                     self.status_manager.push_status("Download failed", "error")
-            break
 
     @Slot(int, int)
     def _on_progress(self, completed, total):

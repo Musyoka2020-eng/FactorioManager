@@ -44,6 +44,7 @@ class _DownloadThread(QThread):
         mod_url: str,
         mods_folder: str,
         include_optional: bool,
+        extra_mods: list,
         cancel_event: threading.Event,
         pause_event: threading.Event,
         parent: Optional[QObject] = None,
@@ -52,6 +53,7 @@ class _DownloadThread(QThread):
         self._mod_url = mod_url
         self._mods_folder = mods_folder
         self._include_optional = include_optional
+        self._extra_mods = extra_mods
         self._cancel_event = cancel_event
         self._pause_event = pause_event
 
@@ -76,8 +78,9 @@ class _DownloadThread(QThread):
             m = _re.search(r"/mod/([^/?&\s]+)", self._mod_url)
             mod_name = m.group(1) if m else self._mod_url.strip()
 
+            mod_list = [mod_name] + [m for m in self._extra_mods if m != mod_name]
             downloaded, failed = downloader.download_mods(
-                [mod_name], include_optional=self._include_optional
+                mod_list, include_optional=self._include_optional
             )
 
             if self._cancel_event.is_set():
@@ -120,6 +123,7 @@ class DownloadQueueJob(QObject):
         mod_url: str,
         mods_folder: str,
         include_optional: bool = False,
+        extra_mods: list = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -127,6 +131,7 @@ class DownloadQueueJob(QObject):
         self._mod_url = mod_url
         self._mods_folder = mods_folder
         self._include_optional = include_optional
+        self._extra_mods = extra_mods or []
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
         self._worker: Optional[_DownloadThread] = None
@@ -152,6 +157,7 @@ class DownloadQueueJob(QObject):
             self._mod_url,
             self._mods_folder,
             self._include_optional,
+            self._extra_mods,
             self._cancel_event,
             self._pause_event,
             parent=self,
