@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .mod import Mod, ModStatus
 from .portal import FactorioPortalAPI, PortalAPIError
 from .downloader import ModDownloader
+from .mod_list import ModListStore
 from ..utils import parse_mod_info, format_file_size
 
 
@@ -154,7 +155,17 @@ class ModChecker:
         
         # Record when we last checked
         self.last_update_check = datetime.now()
-        
+
+        # Merge enabled state from mod-list.json into every scanned mod.
+        # Mods absent from the file default to enabled (Factorio's own default).
+        try:
+            ml_store = ModListStore(self.mods_folder)
+            enabled_map = ml_store.load()
+            for name, mod in self.mods.items():
+                mod.enabled = enabled_map.get(name, True)
+        except Exception as e:  # noqa: BLE001
+            self._log_progress(f"  ⚠ Could not read mod-list.json: {e}")
+
         return self.mods
 
     def check_updates(self, force_refresh: bool = False) -> tuple[Dict[str, Mod], bool]:

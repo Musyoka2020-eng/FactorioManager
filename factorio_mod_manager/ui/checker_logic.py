@@ -114,6 +114,24 @@ class CheckerLogic:
             self.logger(f"[DELETE] ✗ Error: {e}", "error")
             raise
     
+    def enable_mod(self, mod_name: str) -> None:
+        """Enable *mod_name* by writing mod-list.json and updating in-memory state."""
+        from ..core.mod_list import ModListStore
+
+        store = ModListStore(self.checker.mods_folder)
+        store.enable(mod_name)
+        if mod_name in self.checker.mods:
+            self.checker.mods[mod_name].enabled = True
+
+    def disable_mod(self, mod_name: str) -> None:
+        """Disable *mod_name* by writing mod-list.json without deleting its ZIP (D-15)."""
+        from ..core.mod_list import ModListStore
+
+        store = ModListStore(self.checker.mods_folder)
+        store.disable(mod_name)
+        if mod_name in self.checker.mods:
+            self.checker.mods[mod_name].enabled = False
+
     def clean_backups(self, backup_folder: str) -> float:
         """
         Delete backup folder and return freed space in MB.

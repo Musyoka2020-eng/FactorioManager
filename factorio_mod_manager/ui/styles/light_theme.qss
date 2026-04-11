@@ -715,3 +715,25 @@ QLabel#diffActionRemove {{ color: {LIGHT_ERROR}; font-weight: bold; }}
 QLabel#diffActionEnable {{ color: {LIGHT_ACCENT}; }}
 QLabel#diffActionDisable {{ color: {LIGHT_WARNING}; }}
 QLabel#diffActionDownload {{ color: {LIGHT_FG_SECONDARY}; }}
+
+/* ── Phase 4: Profile Library Dialog ──────────────── */
+QFrame#profileLibraryCard {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#sectionHeader {{
+    font-weight: bold;
+    font-size: 10pt;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#sectionDescription {{
+    color: {LIGHT_FG_SECONDARY};
+}}
+QLabel#presetFamilyName {{
+    font-weight: bold;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#presetFamilyDesc {{
+    color: {LIGHT_FG_SECONDARY};
+}}

@@ -28,11 +28,19 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import ModChecker, Mod, ModStatus
+from ..core.queue_models import (
+    OperationKind,
+    OperationSource,
+    OperationState,
+    QueueOperation,
+)
 from ..utils import config, format_file_size, is_online
 from .widgets import NotificationManager
 from .checker_logic import CheckerLogic
 from .checker_presenter import CheckerPresenter
 from .filter_sort_bar import FilterSortBar
+from .queue_strip import QueueStrip
+from .update_queue_job import UpdateQueueJob
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +149,9 @@ class CheckerTab(QWidget):
         self.status_manager = status_manager
         self.notification_manager: Optional[NotificationManager] = None
 
+        self._queue_controller = None    # injected by MainWindow after construction
+        self._active_jobs: dict = {}     # op_id → UpdateQueueJob, keeps jobs alive
+
         self._first_show = True          # auto-scan guard
         self._mods: Dict[str, Mod] = {}
         self._selected_mods: set = set()
@@ -163,6 +174,14 @@ class CheckerTab(QWidget):
 
     def set_notification_manager(self, manager: NotificationManager) -> None:
         self.notification_manager = manager
+
+    def set_queue_controller(self, controller) -> None:
+        """Inject the shared QueueController (called by MainWindow)."""
+        self._queue_controller = controller
+        if hasattr(self, "_queue_strip"):
+            controller.queue_changed.connect(
+                lambda ops: self._queue_strip.update_from_operations(ops)
+            )
 
     def _notify(self, message, notif_type="info", duration_ms=4000, actions=None):
         if self.notification_manager is not None:
@@ -191,6 +210,10 @@ class CheckerTab(QWidget):
         page_title.setObjectName("pageTitle")
         header_layout.addWidget(page_title)
         header_layout.addStretch()
+
+        self._header_profiles_btn = QPushButton("Profiles")
+        self._header_profiles_btn.clicked.connect(self._on_open_profiles)
+        header_layout.addWidget(self._header_profiles_btn)
 
         self._header_check_btn = QPushButton("Check for Updates")
         self._header_check_btn.setObjectName("accentButton")
@@ -262,20 +285,22 @@ class CheckerTab(QWidget):
 
         # ----- CENTER: QTableWidget -----
         self.mod_table = QTableWidget()
-        self.mod_table.setColumnCount(6)
+        self.mod_table.setColumnCount(7)
         self.mod_table.setHorizontalHeaderLabels(
-            ["✔", "Name", "Status", "Version", "Author", "Downloads"]
+            ["✔", "On", "Name", "Status", "Version", "Author", "Downloads"]
         )
         self.mod_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.mod_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         header = self.mod_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.mod_table.setColumnWidth(0, 30)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.mod_table.setColumnWidth(1, 35)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.mod_table.verticalHeader().setVisible(False)
         self.mod_table.setAlternatingRowColors(True)
 
@@ -315,6 +340,11 @@ class CheckerTab(QWidget):
         )
         self._filter_bar.filter_changed.connect(self._on_filter_bar_changed)
         workspace_layout.addWidget(self._filter_bar)
+
+        # Inline queue strip — shown when checker updates are queued (between filter bar and table)
+        self._queue_strip = QueueStrip(source_filter=OperationSource.CHECKER)
+        self._queue_strip.open_queue_requested.connect(self._on_open_queue_requested)
+        workspace_layout.addWidget(self._queue_strip)
 
         workspace_layout.addWidget(splitter, stretch=1)
         self.op_log = QTextEdit()
@@ -388,7 +418,7 @@ class CheckerTab(QWidget):
         self.mod_table.setRowCount(len(filtered))
 
         for row, (mod_name, mod) in enumerate(filtered):
-            # Col 0: checkbox
+            # Col 0: bulk-select checkbox
             chk = QCheckBox()
             chk.setChecked(mod_name in self._selected_mods)
             chk.stateChanged.connect(
@@ -401,30 +431,52 @@ class CheckerTab(QWidget):
             chk_layout.setContentsMargins(0, 0, 0, 0)
             self.mod_table.setCellWidget(row, 0, chk_cell)
 
-            # Col 1: name
+            # Col 1: enabled toggle (D-14 — separate from bulk-select)
+            enabled_chk = QCheckBox()
+            enabled_chk.setChecked(getattr(mod, "enabled", True))
+            enabled_chk.setToolTip("Enable / disable this mod (keeps ZIP on disk)")
+            enabled_chk.stateChanged.connect(
+                lambda state, name=mod_name: self._on_enabled_changed(name, state)
+            )
+            en_cell = QWidget()
+            en_layout = QHBoxLayout(en_cell)
+            en_layout.addWidget(enabled_chk)
+            en_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            en_layout.setContentsMargins(0, 0, 0, 0)
+            self.mod_table.setCellWidget(row, 1, en_cell)
+
+            # Col 2: name
             name_item = QTableWidgetItem(mod_name)
             name_item.setData(Qt.ItemDataRole.UserRole, mod_name)
-            self.mod_table.setItem(row, 1, name_item)
+            self.mod_table.setItem(row, 2, name_item)
 
-            # Col 2: status
+            # Col 3: status
             status_text, color = _STATUS_COLORS.get(
                 mod.status, ("❓ Unknown", "#b0b0b0")
             )
             status_item = QTableWidgetItem(status_text)
             status_item.setForeground(QColor(color))
-            self.mod_table.setItem(row, 2, status_item)
+            self.mod_table.setItem(row, 3, status_item)
 
-            # Col 3: version
+            # Col 4: version
             installed = mod.version or "?"
             latest = mod.latest_version or "?"
             version_text = f"{installed} → {latest}" if mod.status == ModStatus.OUTDATED else installed
-            self.mod_table.setItem(row, 3, QTableWidgetItem(version_text))
+            self.mod_table.setItem(row, 4, QTableWidgetItem(version_text))
 
-            # Col 4: author
-            self.mod_table.setItem(row, 4, QTableWidgetItem(mod.author or ""))
+            # Col 5: author
+            self.mod_table.setItem(row, 5, QTableWidgetItem(mod.author or ""))
 
-            # Col 5: downloads
-            self.mod_table.setItem(row, 5, QTableWidgetItem(str(mod.downloads or "")))
+            # Col 6: downloads
+            self.mod_table.setItem(row, 6, QTableWidgetItem(str(mod.downloads or "")))
+
+            # Dim text columns for disabled mods (D-14 visual treatment)
+            if not getattr(mod, "enabled", True):
+                dim = QColor("#888888")
+                for col_idx in (2, 3, 4, 5, 6):
+                    item = self.mod_table.item(row, col_idx)
+                    if item:
+                        item.setForeground(dim)
 
         self.mod_table.scrollToTop()
 
@@ -465,6 +517,33 @@ class CheckerTab(QWidget):
         else:
             self._selected_mods.discard(mod_name)
         self._update_button_states()
+
+    def _on_enabled_changed(self, mod_name: str, state: int) -> None:
+        """Toggle mod enabled state in mod-list.json without deleting the ZIP."""
+        if not self._logic:
+            return
+        enabled = state == Qt.CheckState.Checked.value
+        if enabled:
+            self._logic.enable_mod(mod_name)
+        else:
+            self._logic.disable_mod(mod_name)
+        # Update dim treatment for this row
+        dim = QColor("#888888")
+        normal = QColor()  # default foreground
+        for row in range(self.mod_table.rowCount()):
+            name_item = self.mod_table.item(row, 2)
+            if name_item and name_item.data(Qt.ItemDataRole.UserRole) == mod_name:
+                for col_idx in (2, 3, 4, 5, 6):
+                    item = self.mod_table.item(row, col_idx)
+                    if item:
+                        item.setForeground(dim if not enabled else normal)
+                break
+
+    def _on_open_queue_requested(self) -> None:
+        """Forward queue-strip 'Open Queue' clicks to the main window."""
+        main_win = self.window()
+        if hasattr(main_win, "open_queue_drawer"):
+            main_win.open_queue_drawer()
 
     # ------------------------------------------------------------------
     # Browse
@@ -561,6 +640,22 @@ class CheckerTab(QWidget):
     # Button handlers
     # ------------------------------------------------------------------
 
+    def _on_open_profiles(self) -> None:
+        """Open the profile library dialog from the Checker header."""
+        from .profile_library_dialog import ProfileLibraryDialog
+
+        folder = self.folder_edit.text().strip()
+        dlg = ProfileLibraryDialog(folder, parent=self)
+        dlg.profile_selected.connect(self._on_profile_selected)
+        dlg.exec()
+
+    def _on_profile_selected(self, profile_identifier: str) -> None:
+        """Receives profile name or preset family name; wired to apply-diff in Plan 04-05."""
+        self._notify(
+            f"Profile '{profile_identifier}' selected — apply will start in the next step.",
+            "info",
+        )
+
     def _on_scan(self):
         if not self._ensure_logic():
             return
@@ -586,6 +681,27 @@ class CheckerTab(QWidget):
     def _on_update_selected(self):
         if not self._selected_mods or not self._ensure_logic():
             return
+
+        if self._queue_controller is not None:
+            mod_names = list(self._selected_mods)
+            label = f"Update {len(mod_names)} mod(s)"
+            op = QueueOperation(
+                source=OperationSource.CHECKER,
+                kind=OperationKind.UPDATE,
+                label=label,
+            )
+            job = UpdateQueueJob(op, mod_names, self._logic, parent=self)
+            self._active_jobs[op.id] = job
+            self._queue_controller.enqueue(op)
+            self._queue_controller.start_next()
+            job.start(self._queue_controller)
+            self._queue_controller.queue_changed.connect(
+                lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+            )
+            self._notify(f"Queued: {label}", "info")
+            return
+
+        # Legacy fallback
         self._set_busy(f"Updating {len(self._selected_mods)} mod(s)…")
         worker = UpdateSelectedWorker(
             self._logic, list(self._selected_mods), parent=self
@@ -599,6 +715,26 @@ class CheckerTab(QWidget):
     def _on_update_all(self):
         if not self._mods or not self._ensure_logic():
             return
+
+        if self._queue_controller is not None:
+            mod_names = list(self._mods.keys())
+            label = f"Update all {len(mod_names)} mod(s)"
+            op = QueueOperation(
+                source=OperationSource.CHECKER,
+                kind=OperationKind.UPDATE,
+                label=label,
+            )
+            job = UpdateQueueJob(op, mod_names, self._logic, parent=self)
+            self._active_jobs[op.id] = job
+            self._queue_controller.enqueue(op)
+            self._queue_controller.start_next()
+            job.start(self._queue_controller)
+            self._queue_controller.queue_changed.connect(
+                lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+            )
+            self._notify(f"Queued: {label}", "info")
+            return
+
         all_names = list(self._mods.keys())
         self._set_busy(f"Updating all {len(all_names)} mod(s)…")
         worker = UpdateSelectedWorker(self._logic, all_names, parent=self)
@@ -607,6 +743,20 @@ class CheckerTab(QWidget):
         worker.log_message.connect(self._append_op_log)
         worker.error.connect(self._on_worker_error)
         worker.start()
+
+    def _on_update_queue_progress(self, operations: list, op_id: str) -> None:
+        """Mirror queue-controller update state into status label and toasts."""
+        for op in operations:
+            if op.id != op_id:
+                continue
+            if op.state == OperationState.COMPLETED:
+                self._on_update_complete([], [])  # trigger table refresh
+                self._notify("✓ Update complete", "success")
+                self._active_jobs.pop(op_id, None)
+            elif op.state == OperationState.FAILED:
+                short = op.failure.short_description if op.failure else "Update failed"
+                self._notify(f"✗ {short}", "error")
+            break
 
     def _on_delete_clicked(self):
         if not self._selected_mods:
