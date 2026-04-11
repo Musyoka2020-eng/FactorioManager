@@ -737,3 +737,34 @@ QLabel#presetFamilyName {{
 QLabel#presetFamilyDesc {{
     color: {LIGHT_FG_SECONDARY};
 }}
+
+/* ── Phase 4: Profile Apply Dialog ───────────────────── */
+QWidget#applyDialogRail {{
+    background-color: {LIGHT_BG_PANEL};
+    border-right: 1px solid {LIGHT_BORDER_DEFAULT};
+}}
+QLabel#applyProfileTitle {{
+    font-size: 11pt;
+    font-weight: bold;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#applyProfileSub {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QWidget#applyDialogRight {{
+    background-color: {LIGHT_BG_PRIMARY};
+}}
+QListWidget#diffList {{
+    background-color: {LIGHT_BG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#diffListLabel {{
+    font-weight: bold;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QWidget#applyDialogDivider {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+}}

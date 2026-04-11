@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import ModChecker, Mod, ModStatus
+from ..core.mod_list import ModListStore
+from ..core.profiles import CURATED_PRESETS, ProfileStore, build_diff
 from ..core.queue_models import (
     OperationKind,
     OperationSource,
@@ -150,7 +152,9 @@ class CheckerTab(QWidget):
         self.notification_manager: Optional[NotificationManager] = None
 
         self._queue_controller = None    # injected by MainWindow after construction
-        self._active_jobs: dict = {}     # op_id → UpdateQueueJob, keeps jobs alive
+        self._active_jobs: dict = {}     # op_id → UpdateQueueJob / ProfileApplyJob
+        self._current_apply_op_id: Optional[str] = None  # undo invalidation tracking
+        self._profile_store = ProfileStore()             # for snapshot undo
 
         self._first_show = True          # auto-scan guard
         self._mods: Dict[str, Mod] = {}
@@ -178,6 +182,8 @@ class CheckerTab(QWidget):
     def set_queue_controller(self, controller) -> None:
         """Inject the shared QueueController (called by MainWindow)."""
         self._queue_controller = controller
+        # Wire undo restore: QueueDrawer duck-types _undo_callback on the controller
+        controller._undo_callback = self._on_undo_restore_callback
         if hasattr(self, "_queue_strip"):
             controller.queue_changed.connect(
                 lambda ops: self._queue_strip.update_from_operations(ops)
@@ -650,11 +656,136 @@ class CheckerTab(QWidget):
         dlg.exec()
 
     def _on_profile_selected(self, profile_identifier: str) -> None:
-        """Receives profile name or preset family name; wired to apply-diff in Plan 04-05."""
-        self._notify(
-            f"Profile '{profile_identifier}' selected — apply will start in the next step.",
-            "info",
+        """Resolve profile, compute diff, confirm via dialog, and enqueue apply job."""
+        from .profile_apply_dialog import ProfileApplyDialog
+        from .profile_apply_job import ProfileApplyJob
+
+        folder = self.folder_edit.text().strip()
+        if not folder or not self._mods:
+            self._notify("Please scan mods first.", "warning")
+            return
+
+        # --- Resolve profile object ---
+        profile = None
+        # Try saved profiles first
+        for p in self._profile_store.load_all():
+            if p.name == profile_identifier:
+                profile = p
+                break
+        # Try curated presets
+        if profile is None:
+            from ..core.profiles import PresetSeed, Profile
+            for seed in CURATED_PRESETS:
+                if seed.family.value == profile_identifier:
+                    import uuid as _uuid
+                    profile = Profile(
+                        id=str(_uuid.uuid4()),
+                        name=seed.family.value,
+                        desired_mods=set(seed.mod_names),
+                    )
+                    break
+        if profile is None:
+            self._notify(f"Profile '{profile_identifier}' not found.", "error")
+            return
+
+        # --- Build diff ---
+        installed_names = list(self._mods.keys())
+        current_enabled = {n: getattr(m, 'enabled', True) for n, m in self._mods.items()}
+        diff = build_diff(profile, installed_names, current_enabled)
+
+        if diff.is_empty:
+            self._notify("No changes needed — already at this profile state.", "info")
+            return
+
+        # --- Confirm via dialog ---
+        from PySide6.QtWidgets import QDialog
+        dlg = ProfileApplyDialog(diff, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if self._queue_controller is None:
+            self._notify("Queue controller not available.", "error")
+            return
+
+        # --- Invalidate previous apply undo ---
+        if self._current_apply_op_id:
+            self._queue_controller.invalidate_undo(self._current_apply_op_id)
+
+        # --- Enqueue apply job ---
+        op = QueueOperation(
+            source=OperationSource.CHECKER,
+            kind=OperationKind.PROFILE_APPLY,
+            label=f"Apply {profile.name}",
         )
+        job = ProfileApplyJob(op, diff, profile, self._profile_store, folder, parent=self)
+        self._active_jobs[op.id] = job
+        self._current_apply_op_id = op.id
+
+        self._queue_controller.enqueue(op)
+        self._queue_controller.start_next()
+        job.start(self._queue_controller)
+        self._queue_controller.queue_changed.connect(
+            lambda ops, _id=op.id: self._on_apply_queue_progress(ops, _id)
+        )
+        self._notify(f"Queued: Apply {profile.name}", "info")
+
+    def _on_apply_queue_progress(self, operations, op_id: str) -> None:
+        """React to queue state changes for the active profile apply operation."""
+        for op in operations:
+            if op.id != op_id:
+                continue
+            if op.state == OperationState.COMPLETED:
+                self._notify(
+                    "✓ Profile applied successfully",
+                    "success",
+                    duration_ms=10000,
+                    actions=[("Undo Restore", lambda _id=op_id: self._trigger_undo(_id))],
+                )
+                self._active_jobs.pop(op_id, None)
+                # Refresh table to reflect new enabled states
+                if self._logic:
+                    self._on_scan()
+            elif op.state == OperationState.FAILED:
+                msg = op.failure.short_description if op.failure else "Unknown error"
+                self._notify(f"✗ Profile apply failed: {msg}", "error")
+                self._active_jobs.pop(op_id, None)
+            break
+
+    def _trigger_undo(self, operation_id: str) -> None:
+        """Called from the 'Undo Restore' toast action."""
+        if self._queue_controller:
+            self._on_undo_restore_callback(operation_id)
+
+    def _on_undo_restore_callback(self, operation_id: str) -> None:
+        """Restore mod-list.json from the apply snapshot (called by QueueDrawer)."""
+        if not self._queue_controller:
+            return
+        op = self._queue_controller.get_operation(operation_id)
+        if op is None or not op.snapshot_id:
+            self._notify("Undo snapshot not available.", "warning")
+            return
+        snapshot = self._profile_store.load_snapshot(op.snapshot_id)
+        if snapshot is None or not snapshot.valid:
+            self._notify("Undo snapshot has already been used or is unavailable.", "warning")
+            return
+
+        # Restore mod-list.json from snapshot
+        ml = ModListStore(Path(self.folder_edit.text().strip()))
+        for mod_name, was_enabled in snapshot.enabled_before.items():
+            if was_enabled:
+                ml.enable(mod_name)
+            else:
+                ml.disable(mod_name)
+
+        # Invalidate snapshot and undo token
+        self._profile_store.invalidate_snapshot(op.snapshot_id)
+        self._queue_controller.invalidate_undo(operation_id)
+        self._current_apply_op_id = None
+
+        self._notify("✓ Restored to previous state.", "success")
+        # Refresh table
+        if self._logic:
+            self._on_scan()
 
     def _on_scan(self):
         if not self._ensure_logic():
