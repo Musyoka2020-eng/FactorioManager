@@ -75,6 +75,9 @@ class MainWindow(QMainWindow):
         # Notification manager (created after central widget exists)
         self._create_notification_manager()
 
+        # Phase 4: shared queue controller + drawer
+        self._create_queue_infrastructure()
+
         # Pages
         self._create_pages()
 
@@ -115,6 +118,18 @@ class MainWindow(QMainWindow):
         # Utility zone: global search bar + settings shortcut button
         self._global_search_bar = GlobalSearchBar(self, parent=header_widget)
         title_row.addWidget(self._global_search_bar)
+
+        # Phase 4: persistent queue badge between search and settings
+        self._queue_badge = QPushButton("0")
+        self._queue_badge.setObjectName("queueBadge")
+        self._queue_badge.setFixedSize(32, 32)
+        self._queue_badge.setToolTip("Operation queue (0 active)")
+        self._queue_badge.setAccessibleName("Queue badge")
+        self._queue_badge.setAccessibleDescription(
+            "Shows number of active queue operations. Click to open the queue drawer."
+        )
+        self._queue_badge.clicked.connect(self.open_queue_drawer)
+        title_row.addWidget(self._queue_badge)
 
         settings_btn = QPushButton("\u2699")
         settings_btn.setObjectName("settingsButton")
@@ -176,6 +191,44 @@ class MainWindow(QMainWindow):
             self.notification_manager = NotificationManager(self.centralWidget())
         except ImportError:
             self.notification_manager = None
+
+    def _create_queue_infrastructure(self) -> None:
+        """Instantiate the shared queue controller and drawer (Phase 4)."""
+        from .queue_controller import QueueController
+        from .queue_drawer import QueueDrawer
+
+        self.queue_controller = QueueController(parent=self)
+        self._queue_drawer = QueueDrawer(
+            controller=self.queue_controller,
+            parent=self.centralWidget(),
+        )
+        self._queue_drawer.raise_()
+
+        # Badge update on every queue change
+        self.queue_controller.badge_count_changed.connect(self._on_queue_badge_changed)
+        self.queue_controller.drawer_open_requested.connect(self.open_queue_drawer)
+
+    def open_queue_drawer(self) -> None:
+        """Open the global queue drawer without navigating away from the current page."""
+        if hasattr(self, '_queue_drawer'):
+            self._queue_drawer.open_drawer()
+            self._queue_drawer.raise_()
+
+    def _on_queue_badge_changed(self, count: int, has_failed: bool) -> None:
+        """Update header queue badge label and style."""
+        if not hasattr(self, '_queue_badge'):
+            return
+        self._queue_badge.setText(str(count) if count > 0 else "0")
+        self._queue_badge.setProperty("active", "true" if (count > 0 or has_failed) else "false")
+        if has_failed:
+            self._queue_badge.setToolTip(f"Operation queue — {count} active, failed items need attention")
+        elif count > 0:
+            self._queue_badge.setToolTip(f"Operation queue ({count} active)")
+        else:
+            self._queue_badge.setToolTip("Operation queue (idle)")
+        # Force QSS dynamic property re-evaluation
+        self._queue_badge.style().unpolish(self._queue_badge)
+        self._queue_badge.style().polish(self._queue_badge)
 
     def _create_pages(self) -> None:
         """Create and add the three page widgets to the page host."""

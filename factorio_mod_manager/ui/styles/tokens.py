@@ -102,3 +102,32 @@ LIGHT_NOTIF_BG_SUCCESS = "#dff6dd"
 LIGHT_NOTIF_BG_ERROR = "#fde7e9"
 LIGHT_NOTIF_BG_WARNING = "#fff4ce"
 LIGHT_NOTIF_BG_INFO = "#cce0f5"
+
+# -- Phase 4 queue tokens ----------------------------------------
+QUEUE_DRAWER_WIDTH = 360       # Right-edge queue drawer fixed width
+QUEUE_BADGE_SIZE = 28          # Header badge button fixed width/height
+QUEUE_CARD_RADIUS = 4          # Queue item card border radius
+QUEUE_CHIP_RADIUS = 10         # State chip border radius
+
+# Queue badge colors
+QUEUE_BADGE_BG = "#1a1a1a"
+QUEUE_BADGE_ACTIVE_BG = "#0078d4"
+QUEUE_BADGE_FAILED_DOT = "#d13438"
+
+# State chip colors (dark)
+QUEUE_CHIP_QUEUED_BG = "#1a2a3a"
+QUEUE_CHIP_RUNNING_BG = "#1a2a3a"
+QUEUE_CHIP_PAUSED_BG = "#3a2f1a"
+QUEUE_CHIP_COMPLETED_BG = "#1e2e1e"
+QUEUE_CHIP_FAILED_BG = "#3a0f0f"
+QUEUE_CHIP_CANCELED_BG = "#222222"
+
+# Light theme equivalents
+LIGHT_QUEUE_BADGE_BG = "#f0f0f0"
+LIGHT_QUEUE_BADGE_ACTIVE_BG = "#0078d4"
+LIGHT_QUEUE_CHIP_QUEUED_BG = "#cce0f5"
+LIGHT_QUEUE_CHIP_RUNNING_BG = "#cce0f5"
+LIGHT_QUEUE_CHIP_PAUSED_BG = "#fff4ce"
+LIGHT_QUEUE_CHIP_COMPLETED_BG = "#dff6dd"
+LIGHT_QUEUE_CHIP_FAILED_BG = "#fde7e9"
+LIGHT_QUEUE_CHIP_CANCELED_BG = "#e8e8e8"

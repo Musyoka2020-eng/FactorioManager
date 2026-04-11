@@ -615,3 +615,103 @@ QScrollArea {{
 QScrollArea > QWidget > QWidget {{
     background-color: transparent;
 }}
+
+/* ── Phase 4: Queue Badge ──────────────────────────────────── */
+QPushButton#queueBadge {{
+    background-color: {LIGHT_QUEUE_BADGE_BG};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    font-size: 9pt;
+    padding: 2px {SPACING_XS}px;
+    min-width: {QUEUE_BADGE_SIZE}px;
+    max-width: {QUEUE_BADGE_SIZE}px;
+    min-height: {QUEUE_BADGE_SIZE}px;
+    max-height: {QUEUE_BADGE_SIZE}px;
+}}
+QPushButton#queueBadge[active="true"] {{
+    background-color: {LIGHT_QUEUE_BADGE_ACTIVE_BG};
+    color: #ffffff;
+    border: 1px solid {LIGHT_QUEUE_BADGE_ACTIVE_BG};
+}}
+QPushButton#queueBadge:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Phase 4: Queue Drawer ─────────────────────────────────── */
+QFrame#queueDrawer {{
+    background-color: {LIGHT_BG_PANEL};
+    border-left: 1px solid {LIGHT_BORDER_DEFAULT};
+}}
+
+/* ── Phase 4: Queue Item Card ──────────────────────────────── */
+QFrame#queueCard {{
+    background-color: {LIGHT_BG_INPUT};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+    padding: {SPACING_SM}px;
+}}
+
+/* ── Phase 4: Queue Inline Strip ───────────────────────────── */
+QFrame#queueStrip {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+    padding: {SPACING_XS}px {SPACING_SM}px;
+}}
+
+/* ── Phase 4: Queue State Chips ────────────────────────────── */
+QLabel#chipQueued {{
+    background-color: {LIGHT_QUEUE_CHIP_QUEUED_BG};
+    color: {LIGHT_ACCENT};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipRunning {{
+    background-color: {LIGHT_QUEUE_CHIP_RUNNING_BG};
+    color: {LIGHT_ACCENT};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipPaused {{
+    background-color: {LIGHT_QUEUE_CHIP_PAUSED_BG};
+    color: {LIGHT_WARNING};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipCompleted {{
+    background-color: {LIGHT_QUEUE_CHIP_COMPLETED_BG};
+    color: {LIGHT_SUCCESS};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipFailed {{
+    background-color: {LIGHT_QUEUE_CHIP_FAILED_BG};
+    color: {LIGHT_ERROR};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipCanceled {{
+    background-color: {LIGHT_QUEUE_CHIP_CANCELED_BG};
+    color: {LIGHT_FG_DISABLED};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+
+/* ── Phase 4: Diff Preview List ────────────────────────────── */
+QFrame#diffPreviewPanel {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#diffActionAdd {{ color: {LIGHT_SUCCESS}; font-weight: bold; }}
+QLabel#diffActionRemove {{ color: {LIGHT_ERROR}; font-weight: bold; }}
+QLabel#diffActionEnable {{ color: {LIGHT_ACCENT}; }}
+QLabel#diffActionDisable {{ color: {LIGHT_WARNING}; }}
+QLabel#diffActionDownload {{ color: {LIGHT_FG_SECONDARY}; }}
