@@ -68,7 +68,7 @@ LOG_SUCCESS = "#4ec952"
 SPACING_2XL = 48      # Section breaks (UI-SPEC.md)
 SPACING_3XL = 64      # Page-level top/bottom rhythm (UI-SPEC.md)
 NAV_RAIL_WIDTH = 200  # Left navigation rail fixed width
-SIDE_PANEL_WIDTH = 220  # Contextual side panel fixed width
+SIDE_PANEL_WIDTH = 320  # Contextual side panel fixed width
 PAGE_HEADER_HEIGHT = 48  # Per-page header zone height
 
 # -- Phase 3 light theme tokens ----------------------------------

@@ -4,14 +4,13 @@ from __future__ import annotations
 from typing import Dict
 
 from PySide6.QtCore import QPoint, QThread, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
-    QKeySequence,
     QLabel,
     QLineEdit,
     QScrollArea,
-    QShortcut,
     QSizePolicy,
     QVBoxLayout,
     QWidget,

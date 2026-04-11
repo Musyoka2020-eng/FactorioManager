@@ -255,12 +255,6 @@ class DownloaderTab(QWidget):
         page_title.setObjectName("pageTitle")
         header_layout.addWidget(page_title)
         header_layout.addStretch()
-
-        self.download_btn_header = QPushButton("Download Mods")
-        self.download_btn_header.setObjectName("accentButton")
-        self.download_btn_header.setEnabled(False)
-        self.download_btn_header.clicked.connect(self._on_download)
-        header_layout.addWidget(self.download_btn_header)
         root.addWidget(header)
 
         # Body splitter: browse panel (left) + detail/download panel (right)
@@ -309,7 +303,7 @@ class DownloaderTab(QWidget):
         # ── RIGHT PANEL: detail + download workflow ────────────────────
         right_frame = QFrame()
         right_frame.setObjectName("sidePanel")
-        right_frame.setFixedWidth(SIDE_PANEL_WIDTH)
+        right_frame.setMinimumWidth(SIDE_PANEL_WIDTH)
         right_layout = QVBoxLayout(right_frame)
         right_layout.setContentsMargins(8, 12, 8, 8)
         right_layout.setSpacing(6)
@@ -434,13 +428,17 @@ class DownloaderTab(QWidget):
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         self.console.setFont(QFont("Cascadia Code", 9))
+        self.console.setMinimumHeight(120)
         self.console.setPlaceholderText("Download progress will appear here…")
         prog_layout.addWidget(self.console, stretch=1)
 
-        right_layout.addWidget(self._progress_widget, stretch=1)
+        right_layout.addWidget(self._progress_widget)
+        right_layout.addStretch(1)
 
         splitter.addWidget(right_frame)
+        splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
+        splitter.setSizes([900, SIDE_PANEL_WIDTH])
 
         # Debounce timer (500 ms)
         self._search_timer = QTimer(self)
@@ -646,7 +644,6 @@ class DownloaderTab(QWidget):
         self._no_mod_lbl.setVisible(False)
         self.optional_checkbox.setEnabled(True)
         self.download_btn.setEnabled(True)
-        self.download_btn_header.setEnabled(True)
         self._restore_config()
 
     def _reset_mod_detail(self) -> None:
@@ -655,7 +652,6 @@ class DownloaderTab(QWidget):
         self._no_mod_lbl.setVisible(True)
         self.optional_checkbox.setEnabled(False)
         self.download_btn.setEnabled(False)
-        self.download_btn_header.setEnabled(False)
         self._progress_widget.setVisible(False)
 
     @Slot(str)
@@ -732,7 +728,6 @@ class DownloaderTab(QWidget):
 
         # Reset download UI
         self.download_btn.setEnabled(False)
-        self.download_btn_header.setEnabled(False)
         self._progress_widget.setVisible(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setProperty("completed", "false")
@@ -771,7 +766,6 @@ class DownloaderTab(QWidget):
     def _on_download_finished(self, all_succeeded, failed):
         # Always re-enable (PREP-03 fix — re-enable on error too)
         self.download_btn.setEnabled(True)
-        self.download_btn_header.setEnabled(True)
         self._active_worker = None
 
         if all_succeeded:

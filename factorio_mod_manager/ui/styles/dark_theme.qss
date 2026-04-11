@@ -477,7 +477,6 @@ QFrame#sidePanel {{
     background-color: {BG_PANEL};
     border-left: 1px solid {BORDER_DEFAULT};
     min-width: {SIDE_PANEL_WIDTH}px;
-    max-width: {SIDE_PANEL_WIDTH}px;
 }}
 
 /* -- Feedback Rail ----------------------------------------- */

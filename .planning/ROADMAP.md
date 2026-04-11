@@ -80,11 +80,11 @@ Plans:
 6. User can view and edit `max_workers`, `auto_backup`, and `auto_refresh` config keys through settings. (Note: these keys already exist in `Config.DEFAULTS` — this phase builds the UI over the pre-existing schema, not the schema itself.)
 **Plans**: 6 plans
 Plans:
-- [ ] 03-01-PLAN.md — Style foundation: LIGHT_* tokens, light_theme.qss, load_and_apply_theme(), missing QSS selectors; credential removal from config + portal
-- [ ] 03-02-PLAN.md — FilterSortBar widget + CheckerTab integration; CategoryChipsBar widget + DownloaderTab integration
-- [ ] 03-03-PLAN.md — SettingsPage widget (mods folder, theme, max_workers, auto_backup, auto_refresh)
-- [ ] 03-04-PLAN.md — GlobalSearchBar + SearchResultsPopup + ModDetailsDialog
-- [ ] 03-05-PLAN.md — MainWindow wiring: SettingsPage nav, GlobalSearchBar header, ModDetailsDialog, paletteChanged auto-theme
+- [x] 03-01-PLAN.md — Style foundation: LIGHT_* tokens, light_theme.qss, load_and_apply_theme(), missing QSS selectors; credential removal from config + portal
+- [x] 03-02-PLAN.md — FilterSortBar widget + CheckerTab integration; CategoryChipsBar widget + DownloaderTab integration
+- [x] 03-03-PLAN.md — SettingsPage widget (mods folder, theme, max_workers, auto_backup, auto_refresh)
+- [x] 03-04-PLAN.md — GlobalSearchBar + SearchResultsPopup + ModDetailsDialog
+- [x] 03-05-PLAN.md — MainWindow wiring: SettingsPage nav, GlobalSearchBar header, ModDetailsDialog, paletteChanged auto-theme
 - [ ] 03-06-PLAN.md — Human verification checkpoint: all 6 requirements end-to-end
 **UI hint**: yes
 
