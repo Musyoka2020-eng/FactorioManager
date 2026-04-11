@@ -45,6 +45,7 @@ class Mod:
     file_size: int = 0
     homepage: str = ""
     status: ModStatus = ModStatus.UNKNOWN
+    enabled: bool = True
     raw_data: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
