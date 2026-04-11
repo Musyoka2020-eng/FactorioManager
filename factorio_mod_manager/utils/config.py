@@ -14,14 +14,14 @@ class Config:
     # Default configuration
     DEFAULTS = {
         "mods_folder": None,  # Will be auto-detected
-        "username": None,
-        "token": None,
         "theme": "dark",
         "auto_backup": True,
         "download_optional": False,
         "auto_refresh": True,
         "max_workers": 4,
     }
+
+    _CREDENTIAL_KEYS = {"username", "token"}
 
     def __init__(self):
         """Initialize configuration."""
@@ -47,8 +47,9 @@ class Config:
     def save(self) -> None:
         """Save configuration to file."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        safe_data = {k: v for k, v in self.data.items() if k not in self._CREDENTIAL_KEYS}
         with open(self.config_file, "w") as f:
-            json.dump(self.data, f, indent=2)
+            json.dump(safe_data, f, indent=2)
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         """Get configuration value."""

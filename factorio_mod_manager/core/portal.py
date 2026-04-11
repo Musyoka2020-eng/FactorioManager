@@ -30,16 +30,8 @@ class FactorioPortalAPI:
     BASE_URL = "https://mods.factorio.com"
     API_URL = "https://mods.factorio.com/api/mods"
 
-    def __init__(self, username: Optional[str] = None, token: Optional[str] = None):
-        """
-        Initialize portal API client.
-        
-        Args:
-            username: Factorio username (for downloading mods)
-            token: Factorio API token (for downloading mods)
-        """
-        self.username = username
-        self.token = token
+    def __init__(self):
+        """Initialize portal API client."""
         self.session = requests.Session()
 
     def get_mod(self, mod_name: str) -> Optional[Dict[str, Any]]:
@@ -250,21 +242,25 @@ class FactorioPortalAPI:
             print(f"Error parsing mod {mod_name}: {e}")
             return None
 
-    def search_mods(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_mods(self, query: str, limit: int = 10, category: str = "") -> List[Dict[str, Any]]:
         """
         Search for mods on the portal.
         
         Args:
             query: Search query
             limit: Maximum results to return
+            category: Optional category tag to filter results
             
         Returns:
             List of mod dictionaries
         """
         try:
+            params = {"q": query, "page_size": max(limit, 50)}
+            if category:
+                params["tag"] = category
             response = self.session.get(
                 f"{self.API_URL}",
-                params={"q": query, "page_size": max(limit, 50)},
+                params=params,
                 timeout=10
             )
             if response.status_code == 200:
