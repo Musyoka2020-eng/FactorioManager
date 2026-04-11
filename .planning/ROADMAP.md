@@ -120,7 +120,12 @@ Plans:
 4. User can view update classifications as safe, review, or risky with rationale for each recommendation.
 5. User can send assistant-recommended batch actions into queue workflow.
 6. User can view per-mod changelog content inside the mod details popup.
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 05-01-PLAN.md — TDD: dependency_graph.py (build_dep_graph, DepType, DepNode, DepState) and update_guidance.py (UpdateGuidanceClassifier, GuidanceResult, UpdateClassification) with full test coverage
+- [ ] 05-02-PLAN.md — ModDetailsDialog refactored to QTabWidget with Dependencies (DepGraphWorker + QTreeWidget + simplified/full toggle) and Changelog (ChangelogWorker + delta rendering) tabs
+- [ ] 05-03-PLAN.md — Checker intelligence: ClassifyWorker, SmartUpdateStrip, Guidance column, Queue Safe Updates, guidance filter, Selected Update Guidance panel, fix _on_view_details
+- [ ] 05-04-PLAN.md — Human UAT checkpoint: verify all 6 Phase 5 success criteria in the running app
 **UI hint**: yes
 
 ### Phase 6: Onboarding and Contextual Help
