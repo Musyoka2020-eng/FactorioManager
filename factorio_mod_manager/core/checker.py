@@ -62,24 +62,35 @@ class ModChecker:
             self._log_progress(f"Mods folder not found: {self.mods_folder}")
             return self.mods
         
-        mod_files = list(self.mods_folder.glob("*.zip"))
-        self._log_progress(f"Found {len(mod_files)} mod files")
-        
+        # Collect both active (.zip) and disabled (.zip.bak) mod files
+        zip_files = list(self.mods_folder.glob("*.zip"))
+        bak_files = list(self.mods_folder.glob("*.zip.bak"))
+        mod_files = zip_files + bak_files
+        self._log_progress(
+            f"Found {len(zip_files)} active mod(s), {len(bak_files)} disabled mod(s)"
+        )
+
         # First pass: parse local mod info
         local_mods = {}
         for mod_file in mod_files:
             try:
-                # Parse filename: modname_version.zip
-                filename = mod_file.stem
-                if '_' in filename:
-                    name, version = filename.rsplit('_', 1)
+                file_name = mod_file.name
+                if file_name.endswith(".zip.bak"):
+                    is_enabled = False
+                    stem = file_name[: -len(".zip.bak")]
                 else:
-                    name = filename
+                    is_enabled = True
+                    stem = mod_file.stem  # strip .zip
+
+                if "_" in stem:
+                    name, version = stem.rsplit("_", 1)
+                else:
+                    name = stem
                     version = "0.0.0"
-                
+
                 # Try to parse info.json for more details
                 info = parse_mod_info(mod_file)
-                
+
                 mod = Mod(
                     name=name,
                     title=info.get("title", name) if info else name,
@@ -90,10 +101,11 @@ class ModChecker:
                     release_date=datetime.fromtimestamp(mod_file.stat().st_mtime),
                     file_size=mod_file.stat().st_size,
                     raw_data=info or {},
+                    enabled=is_enabled,
                 )
-                
+
                 local_mods[name] = mod
-            
+
             except Exception as e:
                 self._log_progress(f"  ✗ Error parsing {mod_file.name}: {e}")
         

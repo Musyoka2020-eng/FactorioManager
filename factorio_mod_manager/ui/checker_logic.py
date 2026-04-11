@@ -140,6 +140,38 @@ class CheckerLogic:
             self.logger(f"[DELETE] ✗ Error: {e}", "error")
             raise
     
+    def enable_mod(self, mod_name: str) -> None:
+        """Re-enable a mod by renaming modname_version.zip.bak -> modname_version.zip."""
+        from pathlib import Path
+
+        mod = self.checker.mods.get(mod_name)
+        if not mod or not mod.file_path:
+            return
+        bak_path = Path(mod.file_path)
+        if not bak_path.name.endswith(".zip.bak"):
+            return  # already a .zip — nothing to do
+        zip_path = bak_path.with_suffix("")  # strips .bak → .zip
+        bak_path.rename(zip_path)
+        mod.file_path = str(zip_path)
+        mod.enabled = True
+        self.logger(f"[ENABLE] {mod_name} re-enabled", "success")
+
+    def disable_mod(self, mod_name: str) -> None:
+        """Disable a mod by renaming modname_version.zip -> modname_version.zip.bak."""
+        from pathlib import Path
+
+        mod = self.checker.mods.get(mod_name)
+        if not mod or not mod.file_path:
+            return
+        zip_path = Path(mod.file_path)
+        if not zip_path.name.endswith(".zip") or zip_path.name.endswith(".zip.bak"):
+            return  # already disabled — nothing to do
+        bak_path = Path(str(zip_path) + ".bak")
+        zip_path.rename(bak_path)
+        mod.file_path = str(bak_path)
+        mod.enabled = False
+        self.logger(f"[DISABLE] {mod_name} disabled (renamed to .zip.bak)", "info")
+
     def clean_backups(self, backup_folder: str) -> float:
         """
         Delete backup folder and return freed space in MB.

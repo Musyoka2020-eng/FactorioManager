@@ -740,15 +740,21 @@ class CheckerTab(QWidget):
         self._update_guidance_panel()
 
     def _on_enabled_changed(self, mod_name: str, state: int) -> None:
-        """Track mod enabled state in app config only — never touches Factorio's mod-list.json."""
+        """Rename mod ZIP to .zip.bak (disable) or back to .zip (enable)."""
+        if not self._logic:
+            return
         enabled = state == Qt.CheckState.Checked.value
-        # Update in-memory mod object
-        if mod_name in self._mods:
-            self._mods[mod_name].enabled = enabled
-        # Persist into app config (not mod-list.json)
-        overrides: dict = config.get("mod_enabled_overrides", {}) or {}
-        overrides[mod_name] = enabled
-        config.set("mod_enabled_overrides", overrides)
+        try:
+            if enabled:
+                self._logic.enable_mod(mod_name)
+            else:
+                self._logic.disable_mod(mod_name)
+        except Exception as exc:
+            self._notify(
+                f"\u2717 Could not {'enable' if enabled else 'disable'} {mod_name}: {exc}",
+                "error",
+            )
+            return
         # Update row dim treatment
         dim = QColor("#888888")
         normal = QColor()  # default foreground
@@ -821,18 +827,18 @@ class CheckerTab(QWidget):
 
     @Slot(object)
     def _on_mods_loaded(self, mods: dict):
-        # Apply any enabled-state overrides saved in app config (never from mod-list.json)
-        overrides: dict = config.get("mod_enabled_overrides", {}) or {}
-        for name, mod in mods.items():
-            if name in overrides:
-                mod.enabled = overrides[name]
         self._mods = mods
         self.mods_loaded.emit(mods)
         self._populate_table(mods)
         self._update_statistics(mods)
-        self._set_idle(f"Found {len(mods)} mod(s)", "#4ec952")
+        n_active = sum(1 for m in mods.values() if m.enabled)
+        n_disabled = len(mods) - n_active
+        label = f"Found {len(mods)} mod(s)"
+        if n_disabled:
+            label += f" ({n_disabled} disabled)"
+        self._set_idle(label, "#4ec952")
         if self.status_manager:
-            self.status_manager.push_status(f"Scan complete — {len(mods)} mod(s)", "success")
+            self.status_manager.push_status(f"Scan complete — {label}", "success")
         self._start_classify(mods)
 
     @Slot(str)
