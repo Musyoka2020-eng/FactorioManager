@@ -1,7 +1,10 @@
 """Global search bar and results popup — Phase 3."""
 from __future__ import annotations
 
+import logging
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import QPoint, QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -41,7 +44,7 @@ class PortalSearchWorker(QThread):
             self.result.emit(results)
         except PortalAPIError as exc:
             self.error.emit(str(exc))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — worker thread must never raise; emit error to UI
             self.error.emit(f"Search failed: {exc}")
 
 
@@ -142,6 +145,7 @@ class SearchResultsPopup(QFrame):
         portal_results: list[dict],
     ) -> None:
         """Populate popup with installed + portal results and show it."""
+        self._focused_row = -1
         self._clear_rows()
 
         installed_matches = [
@@ -289,6 +293,9 @@ class GlobalSearchBar(QWidget):
             return
         # Cancel previous portal worker
         if self._portal_worker and self._portal_worker.isRunning():
+            self._portal_worker.result.disconnect(self._on_portal_results)
+            self._portal_worker.error.disconnect(self._on_portal_error)
+            self._portal_worker.requestInterruption()
             self._portal_worker.quit()
         worker = PortalSearchWorker(query, parent=self)
         self._portal_worker = worker
@@ -307,6 +314,7 @@ class GlobalSearchBar(QWidget):
         self._portal_worker = None
 
     def _on_portal_error(self, error: str) -> None:
+        logger.warning("Portal search error: %s", error)
         self._portal_worker = None
 
     def _show_popup(self, query: str, portal_results: list) -> None:

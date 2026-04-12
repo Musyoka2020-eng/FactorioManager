@@ -141,34 +141,38 @@ class CheckerLogic:
             raise
     
     def enable_mod(self, mod_name: str) -> None:
-        """Re-enable a mod by renaming modname_version.zip.bak -> modname_version.zip."""
+        """Re-enable a mod by renaming .zip.bak -> .zip and marking enabled in mod-list.json."""
         from pathlib import Path
+        from ..core.mod_list import ModListStore
 
         mod = self.checker.mods.get(mod_name)
         if not mod or not mod.file_path:
             return
         bak_path = Path(mod.file_path)
-        if not bak_path.name.endswith(".zip.bak"):
-            return  # already a .zip — nothing to do
-        zip_path = bak_path.with_suffix("")  # strips .bak → .zip
-        bak_path.rename(zip_path)
-        mod.file_path = str(zip_path)
+        if bak_path.name.endswith(".zip.bak"):
+            zip_path = bak_path.with_suffix("")  # strips .bak → .zip
+            bak_path.rename(zip_path)
+            mod.file_path = str(zip_path)
+        # Sync mod-list.json regardless of whether we renamed (in case they diverged)
+        ModListStore(self.checker.mods_folder).toggle(mod_name, True)
         mod.enabled = True
         self.logger(f"[ENABLE] {mod_name} re-enabled", "success")
 
     def disable_mod(self, mod_name: str) -> None:
-        """Disable a mod by renaming modname_version.zip -> modname_version.zip.bak."""
+        """Disable a mod by renaming .zip -> .zip.bak and marking disabled in mod-list.json."""
         from pathlib import Path
+        from ..core.mod_list import ModListStore
 
         mod = self.checker.mods.get(mod_name)
         if not mod or not mod.file_path:
             return
         zip_path = Path(mod.file_path)
-        if not zip_path.name.endswith(".zip") or zip_path.name.endswith(".zip.bak"):
-            return  # already disabled — nothing to do
-        bak_path = Path(str(zip_path) + ".bak")
-        zip_path.rename(bak_path)
-        mod.file_path = str(bak_path)
+        if zip_path.name.endswith(".zip") and not zip_path.name.endswith(".zip.bak"):
+            bak_path = Path(str(zip_path) + ".bak")
+            zip_path.rename(bak_path)
+            mod.file_path = str(bak_path)
+        # Sync mod-list.json regardless of whether we renamed (in case they diverged)
+        ModListStore(self.checker.mods_folder).toggle(mod_name, False)
         mod.enabled = False
         self.logger(f"[DISABLE] {mod_name} disabled (renamed to .zip.bak)", "info")
 

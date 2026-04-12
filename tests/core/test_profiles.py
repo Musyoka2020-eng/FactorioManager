@@ -162,3 +162,180 @@ def test_snapshot_invalidation(profile_store: ProfileStore) -> None:
     loaded = profile_store.load_snapshot("snap-2")
     assert loaded is not None
     assert loaded.valid is False
+
+
+# ---------------------------------------------------------------------------
+# Test 4: dependency-aware build_diff
+# ---------------------------------------------------------------------------
+
+def _make_mod(name: str, required_deps: list[str] | None = None):
+    """Return a minimal Mod-like object with raw_data deps."""
+    from factorio_mod_manager.core.mod import Mod
+    deps = list(required_deps or [])
+    return Mod(
+        name=name,
+        title=name,
+        version="1.0.0",
+        author="Test",
+        raw_data={"dependencies": deps},
+    )
+
+
+def test_diff_does_not_download_base() -> None:
+    """base has no ZIP file; it must never appear as a DOWNLOAD item."""
+    profile = Profile(id="p1", name="Test", desired_mods=["base", "my-mod"])
+    diff = build_diff(
+        profile,
+        installed_zip_names=["my-mod"],   # no base.zip — realistic
+        current_enabled={"my-mod": True},
+    )
+    assert not any(i.mod_name == "base" for i in diff.items), (
+        "base should never appear in a diff"
+    )
+
+
+def test_diff_does_not_disable_required_dep_of_desired_mod() -> None:
+    """flib is a required dep of my-lib; it must not be disabled even if not in the profile."""
+    flib = _make_mod("flib")
+    my_lib = _make_mod("my-lib", required_deps=["flib >= 1.0"])
+    mods = {"flib": flib, "my-lib": my_lib}
+
+    profile = Profile(id="p1", name="Test", desired_mods=["my-lib"])
+    diff = build_diff(
+        profile,
+        installed_zip_names=["flib", "my-lib"],
+        current_enabled={"flib": True, "my-lib": True},
+        installed_mods=mods,
+    )
+    assert not any(
+        i.action == DiffAction.DISABLE and i.mod_name == "flib" for i in diff.items
+    ), "flib is a required dep of my-lib and must not be disabled"
+
+
+def test_diff_disables_optional_dep_not_in_profile() -> None:
+    """An optional dep that is not in the profile IS safe to disable."""
+    helper = _make_mod("optional-helper")
+    my_lib = _make_mod("my-lib", required_deps=["? optional-helper"])
+    mods = {"optional-helper": helper, "my-lib": my_lib}
+
+    profile = Profile(id="p1", name="Test", desired_mods=["my-lib"])
+    diff = build_diff(
+        profile,
+        installed_zip_names=["optional-helper", "my-lib"],
+        current_enabled={"optional-helper": True, "my-lib": True},
+        installed_mods=mods,
+    )
+    assert any(
+        i.action == DiffAction.DISABLE and i.mod_name == "optional-helper" for i in diff.items
+    ), "optional dep not in profile should be disabled"
+
+
+def test_diff_protects_transitive_required_dep() -> None:
+    """A -> B -> C (all required): applying profile with only A must keep B and C enabled."""
+    mod_c = _make_mod("mod-c")
+    mod_b = _make_mod("mod-b", required_deps=["mod-c"])
+    mod_a = _make_mod("mod-a", required_deps=["mod-b"])
+    mods = {"mod-a": mod_a, "mod-b": mod_b, "mod-c": mod_c}
+
+    profile = Profile(id="p1", name="Test", desired_mods=["mod-a"])
+    diff = build_diff(
+        profile,
+        installed_zip_names=["mod-a", "mod-b", "mod-c"],
+        current_enabled={"mod-a": True, "mod-b": True, "mod-c": True},
+        installed_mods=mods,
+    )
+    disabled = {i.mod_name for i in diff.items if i.action == DiffAction.DISABLE}
+    assert "mod-b" not in disabled, "mod-b is a required dep (transitive) and must be kept"
+    assert "mod-c" not in disabled, "mod-c is a required dep (transitive) and must be kept"
+
+
+# ---------------------------------------------------------------------------
+# Test 5: disabled_in_profile field
+# ---------------------------------------------------------------------------
+
+def test_disabled_in_profile_generates_disable_action() -> None:
+    """A mod that is in desired_mods AND disabled_in_profile should be DISABLED on apply."""
+    profile = Profile(
+        id="p1",
+        name="Test",
+        desired_mods=["my-mod"],
+        disabled_in_profile=["my-mod"],
+    )
+    diff = build_diff(
+        profile,
+        installed_zip_names=["my-mod"],
+        current_enabled={"my-mod": True},
+    )
+    assert any(
+        i.action == DiffAction.DISABLE and i.mod_name == "my-mod" for i in diff.items
+    ), "mod in disabled_in_profile that is currently enabled should get DISABLE action"
+
+
+def test_disabled_in_profile_excluded_from_enable() -> None:
+    """A mod in disabled_in_profile must NOT get an ENABLE action even if currently disabled."""
+    profile = Profile(
+        id="p1",
+        name="Test",
+        desired_mods=["my-mod"],
+        disabled_in_profile=["my-mod"],
+    )
+    diff = build_diff(
+        profile,
+        installed_zip_names=["my-mod"],
+        current_enabled={"my-mod": False},
+    )
+    assert not any(
+        i.action == DiffAction.ENABLE and i.mod_name == "my-mod" for i in diff.items
+    ), "mod in disabled_in_profile must not be enabled by the diff"
+    # Also must not be downloaded
+    assert not any(
+        i.action == DiffAction.DOWNLOAD and i.mod_name == "my-mod" for i in diff.items
+    )
+
+
+def test_disabled_in_profile_deps_not_protected_in_safe_set() -> None:
+    """Required dep of a disabled profile mod is NOT in the safe_set, so it can be disabled."""
+    flib = _make_mod("flib")
+    my_lib = _make_mod("my-lib", required_deps=["flib"])
+    mods = {"flib": flib, "my-lib": my_lib}
+
+    # my-lib is in profile but disabled; flib is its required dep but not in profile
+    profile = Profile(
+        id="p1",
+        name="Test",
+        desired_mods=["my-lib"],
+        disabled_in_profile=["my-lib"],
+    )
+    diff = build_diff(
+        profile,
+        installed_zip_names=["flib", "my-lib"],
+        current_enabled={"flib": True, "my-lib": True},
+        installed_mods=mods,
+    )
+    disabled = {i.mod_name for i in diff.items if i.action == DiffAction.DISABLE}
+    # flib should be disabled because my-lib (its only consumer) is disabled in profile
+    assert "flib" in disabled, (
+        "flib should be disabled — its only dependent (my-lib) is disabled_in_profile"
+    )
+
+
+def test_profile_serialization_includes_disabled_in_profile() -> None:
+    """Profile.to_dict() and from_dict() round-trip disabled_in_profile."""
+    profile = Profile(
+        id="p1",
+        name="Test",
+        desired_mods=["mod-a", "mod-b"],
+        disabled_in_profile=["mod-b"],
+    )
+    d = profile.to_dict()
+    assert d["disabled_in_profile"] == ["mod-b"]
+
+    loaded = Profile.from_dict(d)
+    assert loaded.disabled_in_profile == ["mod-b"]
+
+
+def test_profile_from_dict_backward_compat_missing_disabled_field() -> None:
+    """Old profiles without disabled_in_profile key parse without error."""
+    d = {"id": "p1", "name": "Old Profile", "desired_mods": ["mod-a"]}
+    loaded = Profile.from_dict(d)
+    assert loaded.disabled_in_profile == []

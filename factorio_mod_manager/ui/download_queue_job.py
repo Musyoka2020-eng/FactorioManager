@@ -66,8 +66,12 @@ class _DownloadThread(QThread):
         try:
             from ..core.downloader import ModDownloader
             from ..core.portal import PortalAPIError
+            from ..utils.config import config as _app_config
 
-            downloader = ModDownloader(self._mods_folder)
+            downloader = ModDownloader(
+                self._mods_folder,
+                max_workers=_app_config.get("max_workers", 4),
+            )
             downloader.set_cancel_event(self._cancel_event)
             downloader.set_pause_event(self._pause_event)
 
@@ -79,7 +83,7 @@ class _DownloadThread(QThread):
             mod_name = m.group(1) if m else self._mod_url.strip()
 
             mod_list = [mod_name] + [m for m in self._extra_mods if m != mod_name]
-            downloaded, failed = downloader.download_mods(
+            _downloaded, failed = downloader.download_mods(
                 mod_list, include_optional=self._include_optional
             )
 
@@ -123,7 +127,7 @@ class DownloadQueueJob(QObject):
         mod_url: str,
         mods_folder: str,
         include_optional: bool = False,
-        extra_mods: list = None,
+        extra_mods: list | None = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -226,6 +230,10 @@ class DownloadQueueJob(QObject):
 
     def _on_finished(self, all_succeeded: bool, failed: list, controller) -> None:
         """Route download outcome to the controller."""
+        try:
+            controller.queue_changed.disconnect(self._on_queue_changed)
+        except RuntimeError:
+            pass
         # If cancelled cooperatively, the controller already owns the state.
         if self._cancel_event.is_set():
             return

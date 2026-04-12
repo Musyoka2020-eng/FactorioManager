@@ -47,6 +47,10 @@ class LoggerTab(QWidget):
             # Direct signal connection — thread-safe via AutoConnection
             log_bridge.log_record.connect(self._append_log)
 
+    def refresh(self) -> None:
+        """No-op — logger is live-streaming and has no discrete refresh."""
+        pass
+
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)

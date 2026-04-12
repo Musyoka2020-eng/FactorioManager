@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from ..utils.config import Config
 
@@ -47,15 +47,28 @@ class Profile:
 
     id: str
     name: str
-    # Set of mod names that should be *enabled* when this profile is active.
+    # Complete list of mods that belong to this profile (both enabled and disabled).
     desired_mods: List[str] = field(default_factory=list)
+    # Mods that are in the profile but the user has explicitly disabled.
+    # They remain visible in the profile but will not be activated on apply.
+    disabled_in_profile: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "desired_mods": self.desired_mods}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "desired_mods": self.desired_mods,
+            "disabled_in_profile": self.disabled_in_profile,
+        }
 
     @staticmethod
     def from_dict(d: dict) -> "Profile":
-        return Profile(id=d["id"], name=d["name"], desired_mods=d.get("desired_mods", []))
+        return Profile(
+            id=d["id"],
+            name=d["name"],
+            desired_mods=d.get("desired_mods", []),
+            disabled_in_profile=d.get("disabled_in_profile", []),
+        )
 
     @staticmethod
     def from_enabled_state(name: str, enabled_mod_names: List[str]) -> "Profile":
@@ -197,10 +210,75 @@ CURATED_PRESETS: List[PresetSeed] = [
 # ---------------------------------------------------------------------------
 
 
+# Mods that are never downloaded or disabled by profile apply.
+_NEVER_DISABLE: frozenset = frozenset({"base"})
+
+
+def _extract_required_dep_names(raw_dep_strings: List[str]) -> List[str]:
+    """Return mod names for REQUIRED (non-optional, non-incompatible) deps.
+
+    Factorio raw dep string prefixes::
+
+        "modname"          -> required
+        "modname >= 1.0"   -> required with version constraint
+        "? modname"        -> optional   (skipped)
+        "(?) modname"      -> optional   (skipped)
+        "! modname"        -> incompatible (skipped)
+    """
+    names: List[str] = []
+    for raw in raw_dep_strings:
+        raw = raw.strip()
+        if not raw:
+            continue
+        # Skip optional and incompatible deps
+        if raw[0] in ("?", "!", "("):
+            continue
+        name = raw.split()[0]
+        if name and name not in _NEVER_DISABLE:
+            names.append(name)
+    return names
+
+
+def _collect_safe_set(
+    desired: Set[str],
+    installed_mods: Optional[Dict[str, Any]],
+) -> Set[str]:
+    """Return *desired* expanded with all transitive required deps present in *installed_mods*.
+
+    Any mod in the returned set is protected from being disabled — the profile
+    apply will keep it enabled even if it is not explicitly listed in the profile.
+    """
+    safe: Set[str] = set(desired)
+    if not installed_mods:
+        return safe
+
+    queue = [m for m in desired if m in installed_mods]
+    visited: Set[str] = set()
+
+    while queue:
+        mod_name = queue.pop()
+        if mod_name in visited:
+            continue
+        visited.add(mod_name)
+
+        mod = installed_mods.get(mod_name)
+        if mod is None:
+            continue
+
+        raw_deps: List[str] = getattr(mod, "raw_data", {}).get("dependencies", [])
+        for dep_name in _extract_required_dep_names(raw_deps):
+            if dep_name in installed_mods and dep_name not in safe:
+                safe.add(dep_name)
+                queue.append(dep_name)
+
+    return safe
+
+
 def build_diff(
     profile: Profile,
     installed_zip_names: List[str],
     current_enabled: Dict[str, bool],
+    installed_mods: Optional[Dict[str, Any]] = None,
 ) -> ProfileDiff:
     """Build an immutable diff payload to reach *profile* from current state.
 
@@ -208,17 +286,33 @@ def build_diff(
         profile: The target profile specifying desired enabled mod names.
         installed_zip_names: Mod names extracted from installed ZIP files.
         current_enabled: Map of mod_name -> currently enabled in mod-list.json.
+        installed_mods: Optional map of mod_name -> Mod.  When provided the
+            transitive required dependencies of all desired mods are added to the
+            safe set so they are not disabled by the apply.
 
     Returns:
         A :class:`ProfileDiff` with explicit add/remove/enable/disable/download items.
+
+    Notes:
+        ``base`` is always excluded from download and disable actions — it has no
+        ZIP in the mods folder and is always kept enabled by Factorio.
     """
-    desired = set(profile.desired_mods)
-    installed = set(installed_zip_names)
+    _disabled_set = set(profile.disabled_in_profile)
+    # desired_enabled: mods that should be active on apply
+    desired_enabled = set(profile.desired_mods) - _disabled_set - _NEVER_DISABLE
+    # desired_disabled: mods in profile that the user has explicitly turned off
+    desired_disabled = (set(profile.desired_mods) & _disabled_set) - _NEVER_DISABLE
+    installed = set(installed_zip_names) - _NEVER_DISABLE
+
+    # safe_set built from desired_enabled only (disabled profile mods don't protect deps)
+    safe_set = _collect_safe_set(desired_enabled, installed_mods)
+
     currently_enabled_set = {name for name, en in current_enabled.items() if en}
 
     items: List[ProfileDiffItem] = []
 
-    for mod in desired:
+    # --- Pass 1: activate desired_enabled mods ---
+    for mod in desired_enabled:
         if mod not in installed:
             # Not installed at all — needs downloading
             items.append(ProfileDiffItem(action=DiffAction.DOWNLOAD, mod_name=mod))
@@ -227,14 +321,21 @@ def build_diff(
             items.append(ProfileDiffItem(action=DiffAction.ENABLE, mod_name=mod))
         # else already enabled — no action needed
 
+    # --- Pass 2: deactivate desired_disabled mods that are currently enabled ---
+    for mod in desired_disabled:
+        if mod in installed and mod in currently_enabled_set:
+            items.append(ProfileDiffItem(action=DiffAction.DISABLE, mod_name=mod))
+
+    # --- Pass 3: disable installed mods that are not in safe_set ---
     for mod in installed:
-        if mod in ("base",):
-            continue  # base is always kept
-        if mod not in desired:
-            if mod in currently_enabled_set:
-                # Installed and enabled but not in target — disable
-                items.append(ProfileDiffItem(action=DiffAction.DISABLE, mod_name=mod))
-            # If already disabled, no action needed
+        if mod in safe_set:
+            continue  # desired or a required dep — keep it enabled
+        if mod in desired_disabled:
+            continue  # already handled in pass 2
+        if mod in currently_enabled_set:
+            # Installed and enabled but not wanted by this profile
+            items.append(ProfileDiffItem(action=DiffAction.DISABLE, mod_name=mod))
+        # If already disabled, no action needed
 
     return ProfileDiff(
         profile_id=profile.id,

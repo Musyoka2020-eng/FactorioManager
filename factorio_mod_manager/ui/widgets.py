@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -58,6 +59,9 @@ class Notification(QFrame):
         self._duration_ms = duration_ms
         self._actions = actions or []
         self._anim: Optional[QPropertyAnimation] = None  # held to prevent GC
+        self._countdown_bar: Optional[QProgressBar] = None
+        self._countdown_timer: Optional[QTimer] = None
+        self._countdown_elapsed: int = 0
 
         # Apply QSS dynamic property — style().unpolish/polish forces re-evaluation
         self.setProperty("notifType", notification_type)
@@ -73,6 +77,10 @@ class Notification(QFrame):
         # Schedule auto-dismiss
         if duration_ms > 0 and not self._actions:
             QTimer.singleShot(duration_ms, self._start_fade)
+        elif duration_ms > 0 and self._actions:
+            # Action toasts: auto-dismiss after timeout with visible countdown bar
+            QTimer.singleShot(duration_ms, self._dismiss_immediate)
+            self._start_countdown(duration_ms)
 
     def _build_ui(self, message: str, notification_type: str) -> None:
         outer = QVBoxLayout(self)
@@ -121,6 +129,35 @@ class Notification(QFrame):
                 btn_row.addWidget(btn)
             outer.addLayout(btn_row)
 
+            # Countdown progress bar — filled initially, drains to 0
+            self._countdown_bar = QProgressBar()
+            self._countdown_bar.setTextVisible(False)
+            self._countdown_bar.setFixedHeight(3)
+            self._countdown_bar.setStyleSheet(
+                "QProgressBar { border: none; background: transparent; border-radius: 0px; }"
+                "QProgressBar::chunk { background: rgba(255,255,255,0.25); border-radius: 0px; }"
+            )
+            outer.addWidget(self._countdown_bar)
+
+    def _start_countdown(self, duration_ms: int) -> None:
+        """Start 100ms-tick timer that drains the countdown bar."""
+        if self._countdown_bar is None:
+            return
+        self._countdown_bar.setRange(0, duration_ms)
+        self._countdown_bar.setValue(duration_ms)
+        self._countdown_elapsed = 0
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(100)
+        self._countdown_timer.timeout.connect(self._on_countdown_tick)
+        self._countdown_timer.start()
+
+    def _on_countdown_tick(self) -> None:
+        if self._countdown_bar is None or self._countdown_timer is None:
+            return
+        self._countdown_elapsed += 100
+        remaining = max(0, self._duration_ms - self._countdown_elapsed)
+        self._countdown_bar.setValue(remaining)
+
     def _action_click(self, callback: Callable) -> None:
         """Invoke action callback then dismiss."""
         try:
@@ -145,6 +182,9 @@ class Notification(QFrame):
 
     def _dismiss_immediate(self) -> None:
         """Skip fade; delete immediately."""
+        if self._countdown_timer is not None:
+            self._countdown_timer.stop()
+            self._countdown_timer = None
         if self._anim is not None:
             self._anim.stop()
         self.dismissed.emit()

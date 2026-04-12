@@ -104,7 +104,7 @@ LIGHT_NOTIF_BG_WARNING = "#fff4ce"
 LIGHT_NOTIF_BG_INFO = "#cce0f5"
 
 # -- Phase 4 queue tokens ----------------------------------------
-QUEUE_DRAWER_WIDTH = 360       # Right-edge queue drawer fixed width
+QUEUE_DRAWER_WIDTH = 380       # Right-edge queue drawer fixed width
 QUEUE_BADGE_SIZE = 28          # Header badge button fixed width/height
 QUEUE_CARD_RADIUS = 4          # Queue item card border radius
 QUEUE_CHIP_RADIUS = 10         # State chip border radius

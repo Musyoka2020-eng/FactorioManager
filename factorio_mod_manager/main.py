@@ -35,12 +35,14 @@ def main() -> None:
         log_file=log_file,
         qt_bridge=log_bridge,
     )
-    logger.info("=" * 60)
-    logger.info("🏭 Factorio Mod Manager started")
-    logger.info("=" * 60)
 
     window = MainWindow(log_queue=log_queue, log_bridge=log_bridge)
     window.show()
+
+    # Emit startup banner after LoggerTab is constructed and connected
+    logger.info("=" * 60)
+    logger.info("🏭 Factorio Mod Manager started")
+    logger.info("=" * 60)
 
     try:
         sys.exit(app.exec())

@@ -30,6 +30,7 @@ class OperationKind(str, Enum):
     UPDATE = "update"
     PROFILE_APPLY = "profile_apply"
     ENABLE_TOGGLE = "enable_toggle"
+    RESOLVE = "resolve"
 
 
 class OperationState(str, Enum):
@@ -71,6 +72,8 @@ class QueueActionState:
     can_skip: bool = False
     can_inspect: bool = False
     can_undo: bool = False
+    can_move_up: bool = False
+    can_move_down: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +100,7 @@ class QueueOperation:
     # Default is False (continue-on-failure) per D-04.
     continue_on_failure: bool = True
 
-    # Progress 0–100, or None if not applicable
+    # Progress 0-100, or None if not applicable
     progress: Optional[int] = None
 
     # Failure details (populated when state == FAILED)

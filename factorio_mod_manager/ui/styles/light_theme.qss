@@ -623,6 +623,24 @@ QLabel#modCardCategory {{
     padding: 1px 4px;
 }}
 
+/* ── Mod browse card status badges (Installed / Update) ────── */
+QLabel#modCardInstalled {{
+    color: {LIGHT_SUCCESS};
+    background-color: {LIGHT_NOTIF_BG_SUCCESS};
+    border: 1px solid {LIGHT_SUCCESS};
+    font-size: 7pt;
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+QLabel#modCardUpdate {{
+    color: {LIGHT_WARNING};
+    background-color: {LIGHT_NOTIF_BG_WARNING};
+    border: 1px solid {LIGHT_WARNING};
+    font-size: 7pt;
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+
 /* ── Pagination bar ───────────────────────────────────────── */
 QPushButton#paginationBtn {{
     background-color: {LIGHT_BG_PANEL};
@@ -670,6 +688,47 @@ QCheckBox#depOptCheckbox::checked {{
     color: {LIGHT_FG_PRIMARY};
 }}
 
+/* ── Conflict detection panel ────────────────────────────── */
+QFrame#conflictSection {{
+    background-color: rgba(200, 120, 0, 0.08);
+    border: 1px solid rgba(200, 120, 0, 0.35);
+    border-radius: 4px;
+    margin-top: 4px;
+}}
+QLabel#conflictHeader {{
+    color: {LIGHT_WARNING};
+    font-weight: 600;
+    font-size: 9pt;
+}}
+QLabel#conflictModName {{
+    color: {LIGHT_WARNING};
+    font-size: 9pt;
+}}
+QPushButton#conflictDisableBtn {{
+    color: {LIGHT_WARNING};
+    font-size: 9pt;
+    padding: 1px 4px;
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+}}
+QPushButton#conflictDisableBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Per-card progress bar in queue drawer ───────────────── */
+QProgressBar#cardProgressBar {{
+    border: none;
+    border-radius: 2px;
+    background-color: {LIGHT_BORDER_DEFAULT};
+    max-height: 6px;
+    min-height: 6px;
+    text-align: center;
+}}
+QProgressBar#cardProgressBar::chunk {{
+    background-color: {LIGHT_ACCENT};
+    border-radius: 2px;
+}}
+
 /* ── Phase 3: Settings Button (header utility zone) ──────── */
 QPushButton#settingsButton {{
     background-color: transparent;
@@ -684,6 +743,25 @@ QPushButton#settingsButton {{
 QPushButton#settingsButton:hover {{
     color: {LIGHT_FG_PRIMARY};
     background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Refresh Button (header utility zone + per-tab headers) ── */
+QPushButton#refreshButton {{
+    background-color: transparent;
+    border: none;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 14pt;
+    padding: 2px {SPACING_XS}px;
+    min-width: 28px;
+    max-width: 28px;
+    border-radius: 4px;
+}}
+QPushButton#refreshButton:hover {{
+    color: {LIGHT_FG_PRIMARY};
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+QPushButton#refreshButton:disabled {{
+    color: {LIGHT_FG_DISABLED};
 }}
 
 /* ── Phase 3: Settings Scroll Area ───────────────────────── */
@@ -729,6 +807,27 @@ QFrame#queueCard {{
     border: 1px solid {LIGHT_BORDER_DEFAULT};
     border-radius: {QUEUE_CARD_RADIUS}px;
     padding: {SPACING_SM}px;
+}}
+QLabel#cardLabel {{
+    color: {LIGHT_FG_PRIMARY};
+    font-size: 9pt;
+}}
+QLabel#cardError {{
+    color: {LIGHT_ERROR};
+    font-size: 8pt;
+}}
+QPushButton#cardActionBtn {{
+    background-color: transparent;
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+    font-size: 8pt;
+    padding: 2px 8px;
+}}
+QPushButton#cardActionBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+    border-color: {LIGHT_BORDER_HOVER};
 }}
 
 /* ── Phase 4: Queue Inline Strip ───────────────────────────── */

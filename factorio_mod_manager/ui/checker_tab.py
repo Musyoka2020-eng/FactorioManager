@@ -298,6 +298,8 @@ class CheckerTab(QWidget):
 
         self._queue_controller = None    # injected by MainWindow after construction
         self._active_jobs: dict = {}     # op_id → UpdateQueueJob / ProfileApplyJob
+        self._queue_progress_handlers: dict = {}  # op_id → connected lambda, for cleanup
+        self._queue_changed_handler = None  # stored lambda for queue_changed connection
         self._current_apply_op_id: Optional[str] = None  # undo invalidation tracking
         self._profile_store = ProfileStore()             # for snapshot undo
 
@@ -334,9 +336,13 @@ class CheckerTab(QWidget):
         # Wire undo restore: QueueDrawer duck-types _undo_callback on the controller
         controller._undo_callback = self._on_undo_restore_callback
         if hasattr(self, "_queue_strip"):
-            controller.queue_changed.connect(
-                lambda ops: self._queue_strip.update_from_operations(ops)
-            )
+            if self._queue_changed_handler:
+                try:
+                    controller.queue_changed.disconnect(self._queue_changed_handler)
+                except RuntimeError:
+                    pass
+            self._queue_changed_handler = lambda ops: self._queue_strip.update_from_operations(ops)
+            controller.queue_changed.connect(self._queue_changed_handler)
 
     def _notify(self, message, notif_type="info", duration_ms=4000, actions=None):
         if self.notification_manager is not None:
@@ -370,6 +376,13 @@ class CheckerTab(QWidget):
         self._header_profiles_btn.clicked.connect(self._on_open_profiles)
         header_layout.addWidget(self._header_profiles_btn)
 
+        self._header_scan_btn = QPushButton("\u21bb")
+        self._header_scan_btn.setObjectName("refreshButton")
+        self._header_scan_btn.setFixedSize(28, 28)
+        self._header_scan_btn.setToolTip("Rescan mods folder (F5)")
+        self._header_scan_btn.clicked.connect(self.refresh)
+        header_layout.addWidget(self._header_scan_btn)
+
         self._header_check_btn = QPushButton("Check for Updates")
         self._header_check_btn.setObjectName("accentButton")
         self._header_check_btn.clicked.connect(self._on_check_updates)
@@ -383,11 +396,13 @@ class CheckerTab(QWidget):
         root.addWidget(workspace, stretch=1)
 
         # Main splitter: left | center | right
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = self._splitter
 
         # ----- LEFT SIDEBAR (220 px fixed) -----
         left_widget = QWidget()
-        left_widget.setFixedWidth(220)
+        left_widget.setMinimumWidth(180)
+        left_widget.setMaximumWidth(260)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(8, 8, 8, 8)
         left_layout.setSpacing(6)
@@ -462,7 +477,8 @@ class CheckerTab(QWidget):
 
         # ----- RIGHT SIDEBAR (280 px fixed) -----
         right_widget = QWidget()
-        right_widget.setFixedWidth(280)
+        right_widget.setMinimumWidth(220)
+        right_widget.setMaximumWidth(360)
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(8)
@@ -563,14 +579,26 @@ class CheckerTab(QWidget):
             self.folder_edit.setText(str(saved))
 
     # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Rescan the mods folder (local only, no portal call)."""
+        self._on_scan()
+
     # showEvent — auto-scan on first tab visit
     # ------------------------------------------------------------------
 
     def showEvent(self, event):
         super().showEvent(event)
+        # Defer splitter sizing until Qt has assigned real geometry
+        QTimer.singleShot(0, self._apply_splitter_sizes)
         if self._first_show:
             self._first_show = False
             QTimer.singleShot(3000, self._auto_scan)
+
+    def _apply_splitter_sizes(self) -> None:
+        total = self._splitter.width()
+        if total > 0:
+            center = max(100, total - 220 - 280)
+            self._splitter.setSizes([220, center, 280])
 
     def _auto_scan(self):
         folder = self.folder_edit.text().strip()
@@ -880,7 +908,16 @@ class CheckerTab(QWidget):
         from .profile_library_dialog import ProfileLibraryDialog
 
         folder = self.folder_edit.text().strip()
-        dlg = ProfileLibraryDialog(folder, parent=self)
+        if not folder or not self._mods:
+            self._notify("Please scan mods first before using profiles.", "warning")
+            return
+
+        dlg = ProfileLibraryDialog(
+            folder,
+            installed_mods=self._mods,
+            queue_controller=self._queue_controller,
+            parent=self,
+        )
         dlg.profile_selected.connect(self._on_profile_selected)
         dlg.exec()
 
@@ -890,6 +927,8 @@ class CheckerTab(QWidget):
         from .profile_apply_job import ProfileApplyJob
 
         folder = self.folder_edit.text().strip()
+        # Guard: pre-check in _on_open_profiles prevents reaching here without mods,
+        # but keep as a safety net for direct callers.
         if not folder or not self._mods:
             self._notify("Please scan mods first.", "warning")
             return
@@ -910,7 +949,7 @@ class CheckerTab(QWidget):
                     profile = Profile(
                         id=str(_uuid.uuid4()),
                         name=seed.family.value,
-                        desired_mods=set(seed.mod_names),
+                        desired_mods=list(seed.mod_names),
                     )
                     break
         if profile is None:
@@ -918,9 +957,16 @@ class CheckerTab(QWidget):
             return
 
         # --- Build diff ---
+        # Use mod-list.json as the authoritative source for current enabled states.
+        from pathlib import Path as _Path
+        from ..core.mod_list import ModListStore as _ModListStore
         installed_names = list(self._mods.keys())
-        current_enabled = {n: getattr(m, 'enabled', True) for n, m in self._mods.items()}
-        diff = build_diff(profile, installed_names, current_enabled)
+        current_enabled = _ModListStore(_Path(folder)).load()
+        # Fall back to Mod.enabled for any mod not yet written to mod-list.json
+        for mod_name, mod in self._mods.items():
+            if mod_name not in current_enabled:
+                current_enabled[mod_name] = getattr(mod, "enabled", True)
+        diff = build_diff(profile, installed_names, current_enabled, self._mods)
 
         if diff.is_empty:
             self._notify("No changes needed — already at this profile state.", "info")
@@ -928,9 +974,13 @@ class CheckerTab(QWidget):
 
         # --- Confirm via dialog ---
         from PySide6.QtWidgets import QDialog
-        dlg = ProfileApplyDialog(diff, parent=self)
+        dlg = ProfileApplyDialog(diff, profile, self._profile_store, parent=self)
+        dlg.download_requested.connect(self._on_profile_download_requested)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+
+        # Use the user-adjusted diff (may have unchecked items removed)
+        effective_diff = dlg.accepted_diff()
 
         if self._queue_controller is None:
             self._notify("Queue controller not available.", "error")
@@ -946,16 +996,16 @@ class CheckerTab(QWidget):
             kind=OperationKind.PROFILE_APPLY,
             label=f"Apply {profile.name}",
         )
-        job = ProfileApplyJob(op, diff, profile, self._profile_store, folder, parent=self)
+        job = ProfileApplyJob(op, effective_diff, profile, self._profile_store, folder, self._mods, parent=self)
         self._active_jobs[op.id] = job
         self._current_apply_op_id = op.id
 
         self._queue_controller.enqueue(op)
         self._queue_controller.start_next()
         job.start(self._queue_controller)
-        self._queue_controller.queue_changed.connect(
-            lambda ops, _id=op.id: self._on_apply_queue_progress(ops, _id)
-        )
+        _handler = lambda ops, _id=op.id: self._on_apply_queue_progress(ops, _id)
+        self._queue_progress_handlers[op.id] = _handler
+        self._queue_controller.queue_changed.connect(_handler)
         self._notify(f"Queued: Apply {profile.name}", "info")
 
     def _on_apply_queue_progress(self, operations, op_id: str) -> None:
@@ -971,6 +1021,7 @@ class CheckerTab(QWidget):
                     actions=[("Undo Restore", lambda _id=op_id: self._trigger_undo(_id))],
                 )
                 self._active_jobs.pop(op_id, None)
+                self._disconnect_queue_handler(op_id)
                 # Refresh table to reflect new enabled states
                 if self._logic:
                     self._on_scan()
@@ -978,12 +1029,51 @@ class CheckerTab(QWidget):
                 msg = op.failure.short_description if op.failure else "Unknown error"
                 self._notify(f"✗ Profile apply failed: {msg}", "error")
                 self._active_jobs.pop(op_id, None)
+                self._disconnect_queue_handler(op_id)
             break
 
     def _trigger_undo(self, operation_id: str) -> None:
         """Called from the 'Undo Restore' toast action."""
         if self._queue_controller:
             self._on_undo_restore_callback(operation_id)
+
+    def _on_profile_download_requested(self, mod_names: list) -> None:
+        """Enqueue download jobs for mods requested from the profile apply/edit dialogs."""
+        if self._queue_controller is None:
+            self._notify("Queue controller not available for download.", "warning")
+            return
+        from .download_queue_job import DownloadQueueJob
+        folder = self.folder_edit.text().strip()
+        for mod_name in mod_names:
+            dl_op = QueueOperation(
+                source=OperationSource.CHECKER,
+                kind=OperationKind.DOWNLOAD,
+                label=f"Download {mod_name} (profile)",
+                continue_on_failure=True,
+            )
+            dl_job = DownloadQueueJob(
+                dl_op,
+                f"https://mods.factorio.com/mod/{mod_name}",
+                folder,
+                parent=self,
+            )
+            self._queue_controller.enqueue(dl_op)
+            self._queue_controller.start_next()
+            dl_job.start(self._queue_controller)
+        if mod_names:
+            self._notify(
+                f"Queued {len(mod_names)} download(s) from profile.",
+                "info",
+            )
+
+    def _disconnect_queue_handler(self, op_id: str) -> None:
+        """Disconnect and remove the per-operation queue_changed handler."""
+        handler = self._queue_progress_handlers.pop(op_id, None)
+        if handler and self._queue_controller:
+            try:
+                self._queue_controller.queue_changed.disconnect(handler)
+            except RuntimeError:
+                pass
 
     def _on_undo_restore_callback(self, operation_id: str) -> None:
         """Restore mod-list.json from the apply snapshot (called by QueueDrawer)."""
@@ -1074,9 +1164,9 @@ class CheckerTab(QWidget):
             self._queue_controller.enqueue(op)
             self._queue_controller.start_next()
             job.start(self._queue_controller)
-            self._queue_controller.queue_changed.connect(
-                lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
-            )
+            _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+            self._queue_progress_handlers[op.id] = _handler
+            self._queue_controller.queue_changed.connect(_handler)
             self._notify(f"Queued: {label}", "info")
             return
 
@@ -1108,9 +1198,9 @@ class CheckerTab(QWidget):
             self._queue_controller.enqueue(op)
             self._queue_controller.start_next()
             job.start(self._queue_controller)
-            self._queue_controller.queue_changed.connect(
-                lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
-            )
+            _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+            self._queue_progress_handlers[op.id] = _handler
+            self._queue_controller.queue_changed.connect(_handler)
             self._notify(f"Queued: {label}", "info")
             return
 
@@ -1129,12 +1219,17 @@ class CheckerTab(QWidget):
             if op.id != op_id:
                 continue
             if op.state == OperationState.COMPLETED:
-                self._on_update_complete([], [])  # trigger table refresh
+                job = self._active_jobs.get(op_id)
+                successful = job.mod_names if job is not None else []
+                self._on_update_complete(successful, [])  # trigger table refresh
                 self._notify("✓ Update complete", "success")
                 self._active_jobs.pop(op_id, None)
+                self._disconnect_queue_handler(op_id)
             elif op.state == OperationState.FAILED:
                 short = op.failure.short_description if op.failure else "Update failed"
                 self._notify(f"✗ {short}", "error")
+                self._active_jobs.pop(op_id, None)
+                self._disconnect_queue_handler(op_id)
             break
 
     def _on_delete_clicked(self):
@@ -1244,6 +1339,12 @@ class CheckerTab(QWidget):
         """Kick off background guidance classification for all loaded mods."""
         if not self._logic or not mods:
             return
+        # Cancel any in-flight classifier so its stale results won't overwrite ours
+        if self._classify_worker is not None and self._classify_worker.isRunning():
+            self._classify_worker.guidance_ready.disconnect()
+            self._classify_worker.requestInterruption()
+            self._classify_worker.quit()
+            self._classify_worker = None
         worker = ClassifyWorker(self._logic, mods, parent=self)
         worker.guidance_ready.connect(self._on_guidance_ready)
         worker.error.connect(lambda msg: self.logger.warning("Classify error: %s", msg))
@@ -1372,9 +1473,9 @@ class CheckerTab(QWidget):
         self._queue_controller.enqueue(op)
         self._queue_controller.start_next()
         job.start(self._queue_controller)
-        self._queue_controller.queue_changed.connect(
-            lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
-        )
+        _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+        self._queue_progress_handlers[op.id] = _handler
+        self._queue_controller.queue_changed.connect(_handler)
         self._notify(
             f"Queued: {label}\nOnly Safe updates are queued here. "
             "Review and Risky items stay manual.",

@@ -167,6 +167,19 @@ class ModChecker:
         # Record when we last checked
         self.last_update_check = datetime.now()
 
+        # Final pass: overlay mod-list.json enabled states onto Mod objects.
+        # mod-list.json is the canonical source of truth; ZIP extension is used
+        # as the initial fallback when an entry is absent from mod-list.json.
+        try:
+            from .mod_list import ModListStore
+            mod_list_states = ModListStore(self.mods_folder).load()
+            for mod_name, mod in self.mods.items():
+                if mod_name in mod_list_states:
+                    mod.enabled = mod_list_states[mod_name]
+                # If not in mod-list.json, keep the value derived from the ZIP extension.
+        except Exception as _ml_exc:
+            self._log_progress(f"  ⚠ Could not overlay mod-list.json: {_ml_exc}")
+
         return self.mods
 
     def check_updates(self, force_refresh: bool = False) -> tuple[Dict[str, Mod], bool]:

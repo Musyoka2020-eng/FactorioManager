@@ -64,6 +64,28 @@ class QueueController(QObject):
         self.queue_changed.emit(list(self._operations))
         return operation.id
 
+    def batch_enqueue(self, operations: List[QueueOperation]) -> List[str]:
+        """Add multiple operations and emit ``queue_changed`` exactly once.
+
+        Avoids N synchronous ``queue_changed`` emissions when enqueuing a
+        batch of resolved dependencies at once.
+        """
+        ids: List[str] = []
+        for op in operations:
+            self._operations.append(op)
+            ids.append(op.id)
+        if operations:
+            self._emit_badge()
+            self.queue_changed.emit(list(self._operations))
+        return ids
+
+    def update_label(self, operation_id: str, new_label: str) -> None:
+        """Update the display label of an operation and emit ``queue_changed``."""
+        op = self._by_id(operation_id)
+        if op is not None:
+            op.label = new_label
+            self.queue_changed.emit(list(self._operations))
+
     # ------------------------------------------------------------------
     # Lifecycle transitions
     # ------------------------------------------------------------------
@@ -77,8 +99,21 @@ class QueueController(QObject):
                 return op
         return None
 
+    def start_up_to(self, n: int) -> List[QueueOperation]:
+        """Transition up to *n* QUEUED items to RUNNING and return them."""
+        started: List[QueueOperation] = []
+        for op in self._operations:
+            if len(started) >= n:
+                break
+            if op.state == OperationState.QUEUED:
+                op.state = OperationState.RUNNING
+                started.append(op)
+        if started:
+            self._notify()
+        return started
+
     def report_progress(self, operation_id: str, progress: int) -> None:
-        """Update progress (0–100) for a running operation."""
+        """Update progress (0-100) for a running operation."""
         op = self._by_id(operation_id)
         if op and op.state == OperationState.RUNNING:
             op.progress = max(0, min(100, progress))
@@ -291,7 +326,7 @@ class QueueController(QObject):
             i for i, op in enumerate(self._operations)
             if op.state in (OperationState.COMPLETED, OperationState.CANCELED)
         ]
-        excess = len(self._operations) - self._RETENTION_LIMIT
+        excess = len(terminal) - self._RETENTION_LIMIT
         if excess > 0 and terminal:
             to_remove = set(terminal[:excess])
             self._operations = [

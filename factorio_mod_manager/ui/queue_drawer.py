@@ -14,12 +14,15 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+from dataclasses import replace
 
 from ..core.queue_models import OperationState, QueueOperation
 from .queue_strip import QueueStrip
@@ -51,6 +54,7 @@ class _QueueItemCard(QFrame):
         on_undo: Callable,
         on_move_up: Callable,
         on_move_down: Callable,
+        action_state_override=None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -79,11 +83,14 @@ class _QueueItemCard(QFrame):
         row1.addWidget(state_chip)
         layout.addLayout(row1)
 
-        # Progress label for running items
-        if operation.state == OperationState.RUNNING and operation.progress is not None:
-            prog_label = QLabel(f"{operation.progress}%")
-            prog_label.setObjectName("cardProgress")
-            layout.addWidget(prog_label)
+        # Progress bar for running items (thin, 4 px)
+        if operation.state == OperationState.RUNNING:
+            prog_bar = QProgressBar()
+            prog_bar.setObjectName("cardProgressBar")
+            prog_bar.setRange(0, 100)
+            prog_bar.setValue(operation.progress if operation.progress is not None else 0)
+            prog_bar.setTextVisible(False)
+            layout.addWidget(prog_bar)
 
         # Failure description for failed items
         if operation.state == OperationState.FAILED and operation.failure:
@@ -93,7 +100,7 @@ class _QueueItemCard(QFrame):
             layout.addWidget(fail_label)
 
         # Row 2: action buttons
-        actions = operation.action_state
+        actions = action_state_override if action_state_override is not None else operation.action_state
         row2 = QHBoxLayout()
         row2.setSpacing(4)
         row2.addStretch()
@@ -109,9 +116,9 @@ class _QueueItemCard(QFrame):
             row2.addWidget(b)
             return b
 
-        if actions.can_move_up if hasattr(actions, 'can_move_up') else False:
+        if actions.can_move_up:
             _btn("↑", on_move_up, "Move up")
-        if actions.can_move_down if hasattr(actions, 'can_move_down') else False:
+        if actions.can_move_down:
             _btn("↓", on_move_down, "Move down")
         if actions.can_pause:
             _btn("Pause", on_pause, "Pause this operation")
@@ -276,7 +283,18 @@ class QueueDrawer(QFrame):
 
         insert_pos = 0
         for state in order:
-            for op in by_state[state]:
+            group = by_state[state]
+            for idx, op in enumerate(group):
+                # Compute positional move flags for queued operations only
+                if state == OperationState.QUEUED:
+                    base_state = op.action_state
+                    action = replace(
+                        base_state,
+                        can_move_up=idx > 0,
+                        can_move_down=idx < len(group) - 1,
+                    )
+                else:
+                    action = op.action_state
                 card = _QueueItemCard(
                     operation=op,
                     on_pause=c.pause,
@@ -288,6 +306,7 @@ class QueueDrawer(QFrame):
                     on_undo=self._on_undo,
                     on_move_up=c.move_up,
                     on_move_down=c.move_down,
+                    action_state_override=action,
                 )
                 self._list_layout.insertWidget(insert_pos, card)
                 insert_pos += 1

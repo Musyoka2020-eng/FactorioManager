@@ -6,7 +6,7 @@ from queue import Queue
 from typing import Optional
 
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -78,6 +78,10 @@ class MainWindow(QMainWindow):
         # Phase 4: shared queue controller + drawer
         self._create_queue_infrastructure()
 
+        # Global F5 refresh shortcut
+        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
+        refresh_shortcut.activated.connect(self._on_refresh_requested)
+
         # Pages
         self._create_pages()
 
@@ -130,6 +134,13 @@ class MainWindow(QMainWindow):
         )
         self._queue_badge.clicked.connect(self.open_queue_drawer)
         title_row.addWidget(self._queue_badge)
+
+        refresh_btn = QPushButton("\u21bb")
+        refresh_btn.setObjectName("refreshButton")
+        refresh_btn.setFixedSize(32, 32)
+        refresh_btn.setToolTip("Refresh current tab (F5)")
+        refresh_btn.clicked.connect(self._on_refresh_requested)
+        title_row.addWidget(refresh_btn)
 
         settings_btn = QPushButton("\u2699")
         settings_btn.setObjectName("settingsButton")
@@ -238,6 +249,10 @@ class MainWindow(QMainWindow):
             self.downloader_tab = DownloaderTab(status_manager=self.status_manager)
             if self.notification_manager:
                 self.downloader_tab.set_notification_manager(self.notification_manager)
+            if hasattr(self, "queue_controller"):
+                self.downloader_tab.set_queue_controller(self.queue_controller)
+            if self.log_bridge:
+                self.downloader_tab.set_log_bridge(self.log_bridge)
             self.page_host.addWidget(self.downloader_tab)  # index 0
         except ImportError:
             placeholder = QWidget()
@@ -253,6 +268,8 @@ class MainWindow(QMainWindow):
             )
             if self.notification_manager:
                 self.checker_tab.set_notification_manager(self.notification_manager)
+            if hasattr(self, "queue_controller"):
+                self.checker_tab.set_queue_controller(self.queue_controller)
             self.page_host.addWidget(self.checker_tab)  # index 1
         except ImportError:
             placeholder = QWidget()
@@ -335,6 +352,19 @@ class MainWindow(QMainWindow):
             btn.setChecked(True)
         else:
             self._on_nav_changed(index)
+
+    def _on_refresh_requested(self) -> None:
+        """Dispatch a refresh to the currently visible tab."""
+        idx = self.page_host.currentIndex()
+        tabs = [
+            getattr(self, "downloader_tab", None),
+            getattr(self, "checker_tab", None),
+            getattr(self, "logger_tab", None),
+            self._settings_page,
+        ]
+        tab = tabs[idx] if 0 <= idx < len(tabs) else None
+        if tab is not None and hasattr(tab, "refresh"):
+            tab.refresh()
 
     # ------------------------------------------------------------------
     # Settings page slots

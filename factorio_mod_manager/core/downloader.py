@@ -49,6 +49,8 @@ class ModDownloader:
         self.mod_progress_callback: Optional[Callable] = None
         # Callback for overall download progress: (completed, total)
         self.overall_progress_callback: Optional[Callable] = None
+        # Callback for single-file byte progress: (downloaded_bytes, total_bytes)
+        self.file_progress_callback: Optional[Callable] = None
 
     def set_progress_callback(self, callback: Callable) -> None:
         """Set callback for progress updates."""
@@ -61,6 +63,10 @@ class ModDownloader:
     def set_overall_progress_callback(self, callback: Callable) -> None:
         """Set callback for overall download progress."""
         self.overall_progress_callback = callback
+
+    def set_file_progress_callback(self, callback: Callable) -> None:
+        """Set callback for single-file byte-level progress: (downloaded_bytes, total_bytes)."""
+        self.file_progress_callback = callback
 
     def set_cancel_event(self, event: threading.Event) -> None:
         """Replace the cancel event (injected by DownloadQueueJob before start)."""
@@ -270,6 +276,10 @@ class ModDownloader:
                         f.write(chunk)
                         downloaded_size += len(chunk)
 
+                        # Emit byte-level progress for per-file tracking
+                        if self.file_progress_callback and total_size > 0:
+                            self.file_progress_callback(downloaded_size, total_size)
+
                         # Log progress for large files
                         if total_size > 0 and downloaded_size % (chunk_size * 100) == 0:
                             progress_pct = (downloaded_size / total_size) * 100
@@ -313,7 +323,7 @@ class ModDownloader:
             if output_path.exists():
                 try:
                     output_path.unlink()
-                except:
+                except OSError:
                     pass
             return False
 

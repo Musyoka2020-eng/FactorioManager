@@ -142,6 +142,10 @@ class UpdateQueueJob(QObject):
             break
 
     def _on_finished(self, all_succeeded: bool, failed: list, controller) -> None:
+        try:
+            controller.queue_changed.disconnect(self._on_queue_changed)
+        except RuntimeError:
+            pass
         if self._cancel_event.is_set():
             return  # controller already owns state
 

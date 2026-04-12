@@ -20,7 +20,8 @@ before starting a new apply (T-04-14).
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
@@ -58,6 +59,7 @@ class _ApplyThread(QThread):
         profile: "Profile",
         profile_store,
         mods_folder: str,
+        installed_mods: Optional[Dict[str, Any]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -65,11 +67,10 @@ class _ApplyThread(QThread):
         self._profile = profile
         self._profile_store = profile_store
         self._mods_folder = mods_folder
+        self._installed_mods = installed_mods or {}
 
     def run(self) -> None:
         try:
-            from pathlib import Path
-
             ml = ModListStore(Path(self._mods_folder))
 
             # 1. Capture pre-apply state for undo snapshot (T-04-14)
@@ -83,13 +84,15 @@ class _ApplyThread(QThread):
             # Persist snapshot BEFORE any mutation
             self._profile_store.save_snapshot(snapshot)
 
-            # 2. Apply local state changes
+            # 2. Apply local state changes — update mod-list.json AND rename ZIPs
             download_mods: List[str] = []
             for item in self._diff.items:
                 if item.action in (DiffAction.ENABLE, DiffAction.ADD):
                     ml.enable(item.mod_name)
+                    self._rename_zip(item.mod_name, enable=True)
                 elif item.action in (DiffAction.DISABLE, DiffAction.REMOVE):
                     ml.disable(item.mod_name)
+                    self._rename_zip(item.mod_name, enable=False)
                 elif item.action == DiffAction.DOWNLOAD:
                     download_mods.append(item.mod_name)
 
@@ -97,6 +100,32 @@ class _ApplyThread(QThread):
 
         except Exception as exc:  # noqa: BLE001
             self.apply_failed.emit(str(exc))
+
+    def _rename_zip(self, mod_name: str, *, enable: bool) -> None:
+        """Rename .zip.bak -> .zip (enable) or .zip -> .zip.bak (disable) if the mod
+        is in the installed_mods map and has a physical file path."""
+        mod = self._installed_mods.get(mod_name)
+        if mod is None or not getattr(mod, "file_path", None):
+            return
+        file_path = Path(mod.file_path)
+        if enable:
+            if file_path.name.endswith(".zip.bak"):
+                new_path = file_path.with_suffix("")  # strip .bak
+                try:
+                    file_path.rename(new_path)
+                    mod.file_path = str(new_path)
+                    mod.enabled = True
+                except OSError:
+                    pass  # best-effort; mod-list.json already updated
+        else:
+            if file_path.name.endswith(".zip") and not file_path.name.endswith(".zip.bak"):
+                new_path = Path(str(file_path) + ".bak")
+                try:
+                    file_path.rename(new_path)
+                    mod.file_path = str(new_path)
+                    mod.enabled = False
+                except OSError:
+                    pass  # best-effort; mod-list.json already updated
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +148,7 @@ class ProfileApplyJob(QObject):
         profile: Profile,
         profile_store,
         mods_folder: str,
+        installed_mods: Optional[Dict[str, Any]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -127,6 +157,7 @@ class ProfileApplyJob(QObject):
         self._profile = profile
         self._profile_store = profile_store
         self._mods_folder = mods_folder
+        self._installed_mods = installed_mods or {}
         self._worker: Optional[_ApplyThread] = None
 
     # ------------------------------------------------------------------
@@ -143,6 +174,7 @@ class ProfileApplyJob(QObject):
             self._profile,
             self._profile_store,
             self._mods_folder,
+            installed_mods=self._installed_mods,
             parent=self,
         )
         self._worker = worker

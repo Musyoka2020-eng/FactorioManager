@@ -597,7 +597,7 @@ class ChangelogWidget(QWidget):
     def _on_load_error(self, _msg: str) -> None:
         self._loading_lbl.setVisible(False)
         self._empty_lbl.setText(
-            "We could not load dependency details. Check your connection, "
+            "We could not load changelog details. Check your connection, "
             "then reopen details or run Check for Updates again."
         )
         self._empty_lbl.setVisible(True)
