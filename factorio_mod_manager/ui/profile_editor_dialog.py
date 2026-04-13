@@ -54,8 +54,6 @@ def resolve_dep_additions(
 ) -> Tuple[List[str], List[str], List[str]]:
     """Compute dep changes needed when *mod_name* is (re-)enabled in the editor.
 
-    Traverses the full dependency graph (BFS) to find all transitive required dependencies.
-
     Returns
     -------
     to_add : list[str]
@@ -67,51 +65,32 @@ def resolve_dep_additions(
         Required dep names that are in neither *desired_mods* nor *installed_mods*
         → need downloading before the profile can work.
     """
+    mod = installed_mods.get(mod_name)
+    if mod is None:
+        return [], [], []
+
+    raw_deps: List[str] = getattr(mod, "raw_data", {}).get("dependencies", [])
+    required_deps: List[str] = []
+    for raw in raw_deps:
+        raw = raw.strip()
+        if not raw or raw[0] in ("?", "!", "("):
+            continue
+        dep_name = raw.split()[0]
+        if dep_name and dep_name != "base":
+            required_deps.append(dep_name)
+
     to_add: List[str] = []
     to_unblock: List[str] = []
     to_download: List[str] = []
 
-    # BFS to traverse all transitive dependencies
-    visited: Set[str] = set()
-    queue: List[str] = [mod_name]
-
-    while queue:
-        current_name = queue.pop(0)
-        if current_name in visited or current_name == "base":
-            continue
-        visited.add(current_name)
-
-        current_mod = installed_mods.get(current_name)
-        if current_mod is None:
-            continue
-
-        raw_deps: List[str] = getattr(current_mod, "raw_data", {}).get("dependencies", [])
-        for raw in raw_deps:
-            raw = raw.strip()
-            if not raw or raw[0] in ("?", "!", "("):
-                continue
-            dep_name = raw.split()[0]
-            if not dep_name or dep_name == "base" or dep_name in visited:
-                continue
-
-            # Classify this dependency
-            if dep_name not in desired_mods:
-                if dep_name in installed_mods:
-                    if dep_name not in to_add:
-                        to_add.append(dep_name)
-                    # Add to queue to discover its transitive deps
-                    queue.append(dep_name)
-                else:
-                    if dep_name not in to_download:
-                        to_download.append(dep_name)
-            elif dep_name in disabled_in_profile:
-                if dep_name not in to_unblock:
-                    to_unblock.append(dep_name)
-                # Add to queue to discover its transitive deps
-                queue.append(dep_name)
+    for dep in required_deps:
+        if dep not in desired_mods:
+            if dep in installed_mods:
+                to_add.append(dep)
             else:
-                # Already in desired_mods and enabled — still traverse its deps
-                queue.append(dep_name)
+                to_download.append(dep)
+        elif dep in disabled_in_profile:
+            to_unblock.append(dep)
 
     return to_add, to_unblock, to_download
 
@@ -367,15 +346,10 @@ class ProfileEditorDialog(QDialog):
 
     def _refresh_category_tabs(self) -> None:
         """Rebuild the category button row."""
-        # Remove ALL items from the layout (buttons and spacers)
-        while self._cat_row.count() > 0:
-            item = self._cat_row.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-                item.widget().deleteLater()
-            elif item.spacerItem():
-                # Spacer items are deleted when removed from layout
-                pass
+        # Remove old buttons
+        for btn in self._cat_buttons.values():
+            btn.setParent(None)
+            btn.deleteLater()
         self._cat_buttons.clear()
 
         for cat in self._categories():

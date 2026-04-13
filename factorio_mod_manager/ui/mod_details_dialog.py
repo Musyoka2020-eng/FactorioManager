@@ -637,14 +637,7 @@ class ModDetailsDialog(QDialog):
         self.setModal(True)
 
         self._mod: "Mod | None" = data if isinstance(data, Mod) else None
-        # For installed-source dialogs, require installed_mods or use empty dict as fallback
-        # (caller should provide the actual installed mod map)
-        if source == "installed" and installed_mods is None:
-            # When opening from installed context, installed_mods should be provided
-            # to avoid misclassifying installed dependencies
-            self._installed_mods: dict = {}
-        else:
-            self._installed_mods: dict = installed_mods or {}
+        self._installed_mods: dict = installed_mods or {}
 
         if isinstance(data, Mod):
             self._name = data.name
