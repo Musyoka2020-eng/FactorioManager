@@ -23,7 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..core.mod_list import ModListStore
 from ..core.profiles import DiffAction, ProfileDiff, Profile, ProfileSnapshot

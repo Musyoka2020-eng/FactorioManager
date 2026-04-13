@@ -27,7 +27,7 @@ from typing import List, Optional
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from ..core.mod import Mod
-from ..core.queue_models import OperationSource, OperationKind, OperationState, QueueFailure, QueueOperation
+from ..core.queue_models import OperationState, QueueFailure, QueueOperation
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class _CoordinatorThread(QThread):
                 mod = future_to_mod[future]
                 try:
                     ok = future.result()
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     ok = False
 
                 completed += 1

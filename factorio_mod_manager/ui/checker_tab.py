@@ -18,8 +18,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -37,8 +35,8 @@ from ..core.queue_models import (
     OperationState,
     QueueOperation,
 )
-from ..core.update_guidance import UpdateClassification, GuidanceResult
-from ..utils import config, format_file_size, is_online
+from ..core.update_guidance import UpdateClassification
+from ..utils import config, format_file_size
 from .widgets import NotificationManager
 from .checker_logic import CheckerLogic
 from .checker_presenter import CheckerPresenter
@@ -224,7 +222,6 @@ class SmartUpdateStrip(QWidget):
 # _UpdateConfirmDialog
 # ---------------------------------------------------------------------------
 
-from PySide6.QtWidgets import QDialog as _QDialog
 
 
 class _UpdateConfirmDialog(QDialog):
@@ -942,7 +939,7 @@ class CheckerTab(QWidget):
                 break
         # Try curated presets
         if profile is None:
-            from ..core.profiles import PresetSeed, Profile
+            from ..core.profiles import Profile
             for seed in CURATED_PRESETS:
                 if seed.family.value == profile_identifier:
                     import uuid as _uuid

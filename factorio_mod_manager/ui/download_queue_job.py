@@ -65,7 +65,6 @@ class _DownloadThread(QThread):
 
         try:
             from ..core.downloader import ModDownloader
-            from ..core.portal import PortalAPIError
             from ..utils.config import config as _app_config
 
             downloader = ModDownloader(

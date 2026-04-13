@@ -1,5 +1,5 @@
 """Business logic for checker tab - thread operations separated from UI."""
-from typing import Callable, Optional, List, Dict
+from typing import Callable, List, Dict
 from ..core import ModChecker, Mod
 from ..core.update_guidance import UpdateGuidanceClassifier, GuidanceResult, UpdateClassification
 
@@ -57,7 +57,6 @@ class CheckerLogic:
         Returns:
             dict[str, GuidanceResult]
         """
-        from ..core.mod import ModStatus
         results = {}
         for name, mod in mods.items():
             try:

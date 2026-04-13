@@ -343,7 +343,7 @@ class ProfileApplyDialog(QDialog):
             self.download_requested.emit([mod_name])
 
     def _on_confirm(self) -> None:
-        # Persist the user's toggles back into the profile's disabled_in_profile
+        # Compute the new disabled list without mutating the profile yet
         currently_disabled = set(self._profile.disabled_in_profile)
         for diff_item in self._diff.items:
             if diff_item.action not in _TOGGLEABLE:
@@ -352,9 +352,15 @@ class ProfileApplyDialog(QDialog):
                 currently_disabled.add(diff_item.mod_name)
             else:
                 currently_disabled.discard(diff_item.mod_name)
-        self._profile.disabled_in_profile = sorted(currently_disabled)
+        new_disabled = sorted(currently_disabled)
+
+        # Create a shallow copy of the profile with the new disabled list for saving
+        import copy
+        profile_to_save = copy.copy(self._profile)
+        profile_to_save.disabled_in_profile = new_disabled
+
         try:
-            self._profile_store.save(self._profile)
+            self._profile_store.save(profile_to_save)
         except Exception as exc:
             # Surface the error and do not accept the dialog
             QMessageBox.critical(
@@ -363,6 +369,9 @@ class ProfileApplyDialog(QDialog):
                 f"Could not save profile changes:\n{exc}\n\nApply cancelled.",
             )
             return
+
+        # Only mutate the original profile after successful save
+        self._profile.disabled_in_profile = new_disabled
         self.accept()
 
     # ------------------------------------------------------------------

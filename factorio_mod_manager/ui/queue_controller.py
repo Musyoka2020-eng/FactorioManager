@@ -8,13 +8,11 @@ and broadcasts snapshot/badge/drawer signals for UI consumers.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
 from ..core.queue_models import (
-    OperationKind,
-    OperationSource,
     OperationState,
     QueueFailure,
     QueueOperation,
