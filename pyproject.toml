@@ -24,8 +24,3 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 factorio-mod-manager = "factorio_mod_manager.main:main"
-
-[project]
-dependencies = [
-    "PySide6>=6.7.4",
-]
