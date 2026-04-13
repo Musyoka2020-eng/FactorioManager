@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QEvent, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -166,6 +166,11 @@ class QueueDrawer(QFrame):
         self._build_ui()
         controller.queue_changed.connect(self._on_queue_changed)
 
+        # Install event filter on the top-level window so _reposition tracks resizes
+        top = self.window()
+        if top is not None and top is not self:
+            top.installEventFilter(self)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -319,16 +324,23 @@ class QueueDrawer(QFrame):
         if hasattr(self._controller, '_undo_callback') and self._controller._undo_callback:
             self._controller._undo_callback(operation_id)
 
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        """Reposition drawer when the top-level window is resized."""
+        if event.type() == QEvent.Type.Resize and self._visible_state:
+            self._reposition()
+        return super().eventFilter(watched, event)
+
     def _reposition(self) -> None:
-        """Anchor the drawer to the right edge of the parent widget."""
+        """Anchor the drawer to the right edge of the parent widget's content area."""
         parent = self.parentWidget()
         if parent is None:
             return
+        rect = parent.contentsRect()
         self.setGeometry(
-            parent.width() - self.width(),
-            0,
+            rect.x() + rect.width() - self.width(),
+            rect.y(),
             self.width(),
-            parent.height(),
+            rect.height(),
         )
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]

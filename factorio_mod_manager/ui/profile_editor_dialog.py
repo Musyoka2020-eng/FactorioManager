@@ -54,6 +54,9 @@ def resolve_dep_additions(
 ) -> Tuple[List[str], List[str], List[str]]:
     """Compute dep changes needed when *mod_name* is (re-)enabled in the editor.
 
+    Performs a BFS over all transitive required dependencies so that indirect
+    requirements (A→B→C) are discovered and handled, not just direct ones.
+
     Returns
     -------
     to_add : list[str]
@@ -65,32 +68,36 @@ def resolve_dep_additions(
         Required dep names that are in neither *desired_mods* nor *installed_mods*
         → need downloading before the profile can work.
     """
-    mod = installed_mods.get(mod_name)
-    if mod is None:
-        return [], [], []
-
-    raw_deps: List[str] = getattr(mod, "raw_data", {}).get("dependencies", [])
-    required_deps: List[str] = []
-    for raw in raw_deps:
-        raw = raw.strip()
-        if not raw or raw[0] in ("?", "!", "("):
-            continue
-        dep_name = raw.split()[0]
-        if dep_name and dep_name != "base":
-            required_deps.append(dep_name)
-
     to_add: List[str] = []
     to_unblock: List[str] = []
     to_download: List[str] = []
 
-    for dep in required_deps:
-        if dep not in desired_mods:
-            if dep in installed_mods:
-                to_add.append(dep)
-            else:
-                to_download.append(dep)
-        elif dep in disabled_in_profile:
-            to_unblock.append(dep)
+    visited: Set[str] = {mod_name}
+    queue: List[str] = [mod_name]
+
+    while queue:
+        current = queue.pop(0)
+        mod = installed_mods.get(current)
+        if mod is None:
+            continue
+        raw_deps: List[str] = getattr(mod, "raw_data", {}).get("dependencies", [])
+        for raw in raw_deps:
+            raw = raw.strip()
+            if not raw or raw[0] in ("?", "!", "("):
+                continue
+            dep_name = raw.split()[0]
+            if not dep_name or dep_name == "base" or dep_name in visited:
+                continue
+            visited.add(dep_name)
+            if dep_name not in desired_mods:
+                if dep_name in installed_mods:
+                    to_add.append(dep_name)
+                else:
+                    to_download.append(dep_name)
+            elif dep_name in disabled_in_profile:
+                to_unblock.append(dep_name)
+            # Recurse into this dep's own requirements
+            queue.append(dep_name)
 
     return to_add, to_unblock, to_download
 
@@ -346,10 +353,14 @@ class ProfileEditorDialog(QDialog):
 
     def _refresh_category_tabs(self) -> None:
         """Rebuild the category button row."""
-        # Remove old buttons
-        for btn in self._cat_buttons.values():
-            btn.setParent(None)
-            btn.deleteLater()
+        # Remove ALL items from the layout (buttons and spacers) to prevent accumulation
+        while self._cat_row.count():
+            item = self._cat_row.takeAt(0)
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+                    w.deleteLater()
         self._cat_buttons.clear()
 
         for cat in self._categories():

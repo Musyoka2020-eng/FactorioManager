@@ -355,8 +355,14 @@ class ProfileApplyDialog(QDialog):
         self._profile.disabled_in_profile = sorted(currently_disabled)
         try:
             self._profile_store.save(self._profile)
-        except Exception:
-            pass  # non-fatal — apply proceeds regardless
+        except Exception as exc:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Save Failed",
+                f"Could not save profile changes: {exc}\n\nThe profile apply will not proceed.",
+            )
+            return
         self.accept()
 
     # ------------------------------------------------------------------

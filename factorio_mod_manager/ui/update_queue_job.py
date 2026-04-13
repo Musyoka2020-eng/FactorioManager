@@ -48,7 +48,7 @@ class _UpdateThread(QThread):
             self.finished.emit(False, list(self._mod_names))
             return
         try:
-            successful, failed = self._logic.update_mods(self._mod_names)
+            _, failed = self._logic.update_mods(self._mod_names)
             if self._cancel_event.is_set():
                 self.finished.emit(False, [])
                 return

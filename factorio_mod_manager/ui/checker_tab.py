@@ -935,9 +935,9 @@ class CheckerTab(QWidget):
 
         # --- Resolve profile object ---
         profile = None
-        # Try saved profiles first
+        # Try saved profiles first (matched by stable id)
         for p in self._profile_store.load_all():
-            if p.name == profile_identifier:
+            if p.id == profile_identifier:
                 profile = p
                 break
         # Try curated presets

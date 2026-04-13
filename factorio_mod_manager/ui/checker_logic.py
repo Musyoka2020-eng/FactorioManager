@@ -149,12 +149,18 @@ class CheckerLogic:
         if not mod or not mod.file_path:
             return
         bak_path = Path(mod.file_path)
+        # Update mod-list.json first; rename second — rollback if rename fails
+        store = ModListStore(self.checker.mods_folder)
+        store.toggle(mod_name, True)
         if bak_path.name.endswith(".zip.bak"):
             zip_path = bak_path.with_suffix("")  # strips .bak → .zip
-            bak_path.rename(zip_path)
+            try:
+                bak_path.rename(zip_path)
+            except OSError as exc:
+                store.toggle(mod_name, False)  # rollback
+                self.logger(f"[ENABLE] ✗ Could not rename archive for {mod_name}: {exc}", "error")
+                raise
             mod.file_path = str(zip_path)
-        # Sync mod-list.json regardless of whether we renamed (in case they diverged)
-        ModListStore(self.checker.mods_folder).toggle(mod_name, True)
         mod.enabled = True
         self.logger(f"[ENABLE] {mod_name} re-enabled", "success")
 
@@ -167,12 +173,18 @@ class CheckerLogic:
         if not mod or not mod.file_path:
             return
         zip_path = Path(mod.file_path)
+        # Update mod-list.json first; rename second — rollback if rename fails
+        store = ModListStore(self.checker.mods_folder)
+        store.toggle(mod_name, False)
         if zip_path.name.endswith(".zip") and not zip_path.name.endswith(".zip.bak"):
             bak_path = Path(str(zip_path) + ".bak")
-            zip_path.rename(bak_path)
+            try:
+                zip_path.rename(bak_path)
+            except OSError as exc:
+                store.toggle(mod_name, True)  # rollback
+                self.logger(f"[DISABLE] ✗ Could not rename archive for {mod_name}: {exc}", "error")
+                raise
             mod.file_path = str(bak_path)
-        # Sync mod-list.json regardless of whether we renamed (in case they diverged)
-        ModListStore(self.checker.mods_folder).toggle(mod_name, False)
         mod.enabled = False
         self.logger(f"[DISABLE] {mod_name} disabled (renamed to .zip.bak)", "info")
 

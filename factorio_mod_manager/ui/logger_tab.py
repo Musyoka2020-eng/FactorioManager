@@ -83,7 +83,7 @@ class LoggerTab(QWidget):
         color = _LEVEL_COLORS.get(level_name.upper(), _DEFAULT_COLOR)
         # Escape HTML entities in the message to prevent injection via log content
         safe_message = html_lib.escape(message)
-        html_line = f'<span style="color:{color};">{safe_message}</span>'
+        html_line = f'<pre style="color:{color};white-space:pre-wrap;margin:0;">{safe_message}</pre>'
         self.log_text.append(html_line)
         # Auto-scroll to latest entry
         sb = self.log_text.verticalScrollBar()

@@ -36,8 +36,8 @@ class _DownloadThread(QThread):
     cooperatively pause or cancel the download without killing the thread.
     """
 
-    progress = Signal(int, int)   # (completed_count, total_count)
-    finished = Signal(bool, list) # (all_succeeded, failed_mod_names)
+    progress = Signal(int, int)          # (completed_count, total_count)
+    finished = Signal(bool, list, str, str)  # (all_succeeded, failed_mod_names, exc_detail, exc_type)
 
     def __init__(
         self,
@@ -89,12 +89,12 @@ class _DownloadThread(QThread):
 
             if self._cancel_event.is_set():
                 # Partial work due to cancel — treat as cancelled, not failure
-                self.finished.emit(False, ["__cancelled__"])
+                self.finished.emit(False, ["__cancelled__"], "", "")
             else:
-                self.finished.emit(len(failed) == 0, failed)
+                self.finished.emit(len(failed) == 0, failed, "", "")
 
         except Exception as exc:  # noqa: BLE001
-            self.finished.emit(False, [str(exc)])
+            self.finished.emit(False, [], str(exc), exc.__class__.__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +173,7 @@ class DownloadQueueJob(QObject):
             )
         )
         worker.finished.connect(
-            lambda ok, failed: self._on_finished(ok, failed, controller)
+            lambda ok, failed, exc_detail, exc_type: self._on_finished(ok, failed, controller, exc_detail, exc_type)
         )
         # Mirror operation state changes (pause/resume/cancel from drawer)
         controller.queue_changed.connect(self._on_queue_changed)
@@ -228,7 +228,7 @@ class DownloadQueueJob(QObject):
                 self._pause_event.clear()
             break
 
-    def _on_finished(self, all_succeeded: bool, failed: list, controller) -> None:
+    def _on_finished(self, all_succeeded: bool, failed: list, controller, exc_detail: str = "", exc_type: str = "") -> None:
         """Route download outcome to the controller."""
         try:
             controller.queue_changed.disconnect(self._on_queue_changed)
@@ -249,6 +249,9 @@ class DownloadQueueJob(QObject):
             if len(real_failed) > 3:
                 short += f" (+{len(real_failed) - 3} more)"
             detail = f"Mods that could not be downloaded: {', '.join(real_failed)}"
+        elif exc_detail:
+            short = f"Download error: {exc_type}" if exc_type else "Download error"
+            detail = exc_detail
         else:
             short = "Download did not complete"
             detail = "The download ended without succeeding. Check your connection and retry."
@@ -266,6 +269,7 @@ class DownloadQueueJob(QObject):
             QueueFailure(
                 short_description=short,
                 detail=detail,
+                exception_type=exc_type or None,
                 retriable=True,
             ),
         )

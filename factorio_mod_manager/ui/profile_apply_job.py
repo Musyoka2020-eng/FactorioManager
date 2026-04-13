@@ -116,7 +116,7 @@ class _ApplyThread(QThread):
                     mod.file_path = str(new_path)
                     mod.enabled = True
                 except OSError:
-                    pass  # best-effort; mod-list.json already updated
+                    raise  # propagate; caller's run() will emit apply_failed
         else:
             if file_path.name.endswith(".zip") and not file_path.name.endswith(".zip.bak"):
                 new_path = Path(str(file_path) + ".bak")
@@ -125,7 +125,7 @@ class _ApplyThread(QThread):
                     mod.file_path = str(new_path)
                     mod.enabled = False
                 except OSError:
-                    pass  # best-effort; mod-list.json already updated
+                    raise  # propagate; caller's run() will emit apply_failed
 
 
 # ---------------------------------------------------------------------------

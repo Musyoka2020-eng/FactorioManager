@@ -146,7 +146,7 @@ class QueueOperation:
     @property
     def is_terminal(self) -> bool:
         """True if the operation has reached a final state."""
-        return self.state in (OperationState.COMPLETED, OperationState.CANCELED)
+        return self.state in (OperationState.COMPLETED, OperationState.CANCELED, OperationState.FAILED)
 
 
 # ---------------------------------------------------------------------------

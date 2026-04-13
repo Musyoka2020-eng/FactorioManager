@@ -178,6 +178,8 @@ class QueueController(QObject):
         if op and op.state == OperationState.FAILED and op.action_state.can_retry:
             op.state = OperationState.QUEUED
             op.failure = None
+            op.progress = None
+            op.inspect_payload = {}
             self._notify()
             return True
         return False

@@ -1,6 +1,7 @@
 """Mod details popup dialog — Phase 5 (3-tab: Overview / Dependencies / Changelog)."""
 from __future__ import annotations
 
+import logging
 from typing import Union
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
@@ -114,6 +115,7 @@ class DependenciesWidget(QWidget):
         self._loaded = False
         self._full_mode = False
         self._worker: DepGraphWorker | None = None
+        self._dep_graph_request_id: int = 0
 
         self._setup_ui()
 
@@ -225,6 +227,12 @@ class DependenciesWidget(QWidget):
 
     # ------------------------------------------------------------------ mode
 
+    def _stop_worker(self) -> None:
+        """Stop the background worker thread if running."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
+
     def _on_mode_simplified(self) -> None:
         self._full_mode = False
         self._collapse_all_btn.setVisible(False)
@@ -250,15 +258,28 @@ class DependenciesWidget(QWidget):
         self._error_lbl.setVisible(False)
         self._empty_lbl.setVisible(False)
 
+        # Cancel any in-flight worker before starting a new one
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
+
+        self._dep_graph_request_id += 1
+        current_token = self._dep_graph_request_id
+
         self._worker = DepGraphWorker(
             self._mod_name, self._installed_mods, self._full_mode, parent=self
         )
-        self._worker.graph_ready.connect(self._on_graph_ready)
+        self._worker.graph_ready.connect(
+            lambda nodes, _tok=current_token: self._on_graph_ready(nodes, _tok)
+        )
         self._worker.error.connect(self._on_load_error)
         self._worker.start()
 
     @Slot(list)
-    def _on_graph_ready(self, nodes: list) -> None:
+    def _on_graph_ready(self, nodes: list, token: int = 0) -> None:
+        # Discard results from a superseded request (stale worker)
+        if token != self._dep_graph_request_id:
+            return
         self._loaded = True
         if not nodes:
             self._empty_lbl.setVisible(True)
@@ -603,6 +624,12 @@ class ChangelogWidget(QWidget):
         self._empty_lbl.setVisible(True)
         self._scroll_area.setVisible(False)
 
+    def _stop_worker(self) -> None:
+        """Stop the background worker thread if running."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
+
 
 # ---------------------------------------------------------------------------
 # ModDetailsDialog — 3-tab shell
@@ -638,12 +665,18 @@ class ModDetailsDialog(QDialog):
 
         self._mod: "Mod | None" = data if isinstance(data, Mod) else None
         self._installed_mods: dict = installed_mods or {}
+        if source == "installed" and not installed_mods:
+            logging.getLogger(__name__).warning(
+                "ModDetailsDialog opened with source='installed' but no installed_mods map "
+                "was supplied — DependenciesWidget will misclassify installed dependencies."
+            )
 
         if isinstance(data, Mod):
             self._name = data.name
             self._title = data.title or data.name
             self._author = data.author or ""
             self._version = data.version or ""
+            self._installed_version: "str | None" = data.version or None
             self._description = data.description or ""
             self._downloads: "int | None" = data.downloads or None
             self._status: "ModStatus | None" = data.status
@@ -654,6 +687,8 @@ class ModDetailsDialog(QDialog):
             self._author = data.get("owner", "")
             releases = data.get("releases", [])
             self._version = releases[-1].get("version", "") if releases else ""
+            _installed_mod = self._installed_mods.get(self._name)
+            self._installed_version = _installed_mod.version if _installed_mod is not None else None
             self._description = data.get("summary", "") or data.get("description", "")
             downloads = data.get("downloads_count")
             self._downloads = int(downloads) if downloads else None
@@ -736,7 +771,7 @@ class ModDetailsDialog(QDialog):
         # Tab 2: Changelog
         self._changelog_widget = ChangelogWidget(
             mod_name=self._name,
-            installed_version=self._version or None,
+            installed_version=self._installed_version,
             latest_version=self._latest_version,
             parent=self,
         )
@@ -772,6 +807,12 @@ class ModDetailsDialog(QDialog):
             self._deps_widget.ensure_loaded()
         elif idx == 2:
             self._changelog_widget.ensure_loaded()
+
+    def closeEvent(self, event) -> None:
+        """Stop any running background workers before the dialog is destroyed."""
+        self._deps_widget._stop_worker()
+        self._changelog_widget._stop_worker()
+        super().closeEvent(event)
 
     def _on_cta(self) -> None:
         if self._source == "portal" and self._name:

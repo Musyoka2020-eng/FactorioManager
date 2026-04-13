@@ -169,13 +169,14 @@ class SaveProfileDialog(QDialog):
         self._tree.blockSignals(True)
         self._tree.clear()
 
-        sorted_mods = sorted(
-            (n for n in self._current_enabled if n != "base"),
-            key=str.lower,
-        )
+        # Union of installed mod names and mod-list.json entries so mods appear
+        # even when mod-list.json is missing/empty (or has entries not on disk).
+        all_mod_names = (set(self._installed_mods.keys()) | set(self._current_enabled.keys())) - {"base"}
+        sorted_mods = sorted(all_mod_names, key=str.lower)
 
         for mod_name in sorted_mods:
-            enabled = self._current_enabled.get(mod_name, False)
+            # Default enabled: use mod-list.json value, or True for installed mods not listed
+            enabled = self._current_enabled.get(mod_name, True)
 
             # Display title from installed_mods if available
             mod_obj = self._installed_mods.get(mod_name)

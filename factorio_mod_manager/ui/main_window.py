@@ -343,6 +343,8 @@ class MainWindow(QMainWindow):
                 return
             # Discard: fall through
         self._prev_page_idx = current
+        if index == 3 and current != 3:
+            self._settings_page.load_values()
         self.page_host.setCurrentIndex(index)
 
     def _navigate_to_page(self, index: int) -> None:
@@ -401,7 +403,7 @@ class MainWindow(QMainWindow):
                 return
         else:
             data = {"name": mod_name}
-        dialog = ModDetailsDialog(data, source, parent=self)
+        dialog = ModDetailsDialog(data, source, parent=self, installed_mods=mods_dict if source == "installed" else None)
         dialog.exec()
 
     # ------------------------------------------------------------------

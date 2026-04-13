@@ -48,17 +48,16 @@ class SettingsPage(QWidget):
         self.logger = logging.getLogger(__name__)
         self._original_values: dict[str, Any] = {}
         self._setup_ui()
-
-    def refresh(self) -> None:
-        """No-op — settings are loaded on navigation and saved explicitly."""
-        pass
-        # Wire action buttons
+        # Wire action buttons once after UI is built
         self._browse_btn.clicked.connect(self._on_browse)
         self._save_btn.clicked.connect(self._on_save)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._reset_btn.clicked.connect(self._on_reset)
         # Live theme preview (D-17): immediate visual change on combo change
         self._theme_combo.currentIndexChanged.connect(self._on_theme_preview)
+
+    def refresh(self) -> None:
+        """No-op — settings are loaded on navigation via load_values() and saved explicitly."""
 
     # ------------------------------------------------------------------
     # UI construction

@@ -59,6 +59,7 @@ class Notification(QFrame):
         self._duration_ms = duration_ms
         self._actions = actions or []
         self._anim: Optional[QPropertyAnimation] = None  # held to prevent GC
+        self._auto_dismiss_timer: Optional[QTimer] = None
         self._countdown_bar: Optional[QProgressBar] = None
         self._countdown_timer: Optional[QTimer] = None
         self._countdown_elapsed: int = 0
@@ -74,12 +75,18 @@ class Notification(QFrame):
         self._build_ui(message, notification_type)
         self.adjustSize()
 
-        # Schedule auto-dismiss
+        # Schedule auto-dismiss using an owned timer so it can be cancelled on early dismiss
         if duration_ms > 0 and not self._actions:
-            QTimer.singleShot(duration_ms, self._start_fade)
+            self._auto_dismiss_timer = QTimer(self)
+            self._auto_dismiss_timer.setSingleShot(True)
+            self._auto_dismiss_timer.timeout.connect(self._start_fade)
+            self._auto_dismiss_timer.start(duration_ms)
         elif duration_ms > 0 and self._actions:
             # Action toasts: auto-dismiss after timeout with visible countdown bar
-            QTimer.singleShot(duration_ms, self._dismiss_immediate)
+            self._auto_dismiss_timer = QTimer(self)
+            self._auto_dismiss_timer.setSingleShot(True)
+            self._auto_dismiss_timer.timeout.connect(self._dismiss_immediate)
+            self._auto_dismiss_timer.start(duration_ms)
             self._start_countdown(duration_ms)
 
     def _build_ui(self, message: str, notification_type: str) -> None:
@@ -182,6 +189,9 @@ class Notification(QFrame):
 
     def _dismiss_immediate(self) -> None:
         """Skip fade; delete immediately."""
+        if self._auto_dismiss_timer is not None:
+            self._auto_dismiss_timer.stop()
+            self._auto_dismiss_timer = None
         if self._countdown_timer is not None:
             self._countdown_timer.stop()
             self._countdown_timer = None
