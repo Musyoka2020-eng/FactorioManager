@@ -1,6 +1,5 @@
 """Mod downloader with dependency resolution."""
-import os
-import shutil
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -33,18 +32,23 @@ class ModDownloader:
         """
         self.mods_folder = Path(mods_folder)
         self.mods_folder.mkdir(parents=True, exist_ok=True)
-        self.portal = FactorioPortalAPI(username, token)
+        self.portal = FactorioPortalAPI()
         self.max_workers = max_workers
         self.session = requests.Session()
-        if username and token:
-            self.session.auth = (username, token)
-        
+
+        # Cooperative control events — replaced by DownloadQueueJob before a
+        # managed run so pause/cancel are shared between the job and the thread.
+        self._cancel_event: threading.Event = threading.Event()
+        self._pause_event: threading.Event = threading.Event()
+
         # Callback for progress updates
         self.progress_callback: Optional[Callable] = None
         # Callback for per-mod status updates: (mod_name, status, progress_pct)
         self.mod_progress_callback: Optional[Callable] = None
         # Callback for overall download progress: (completed, total)
         self.overall_progress_callback: Optional[Callable] = None
+        # Callback for single-file byte progress: (downloaded_bytes, total_bytes)
+        self.file_progress_callback: Optional[Callable] = None
 
     def set_progress_callback(self, callback: Callable) -> None:
         """Set callback for progress updates."""
@@ -57,6 +61,18 @@ class ModDownloader:
     def set_overall_progress_callback(self, callback: Callable) -> None:
         """Set callback for overall download progress."""
         self.overall_progress_callback = callback
+
+    def set_file_progress_callback(self, callback: Callable) -> None:
+        """Set callback for single-file byte-level progress: (downloaded_bytes, total_bytes)."""
+        self.file_progress_callback = callback
+
+    def set_cancel_event(self, event: threading.Event) -> None:
+        """Replace the cancel event (injected by DownloadQueueJob before start)."""
+        self._cancel_event = event
+
+    def set_pause_event(self, event: threading.Event) -> None:
+        """Replace the pause event (injected by DownloadQueueJob before start)."""
+        self._pause_event = event
 
     def _log_progress(self, message: str) -> None:
         """Log progress message."""
@@ -227,7 +243,7 @@ class ModDownloader:
             response = requests.get(mirror_url, timeout=60, stream=True)
             
             if response.status_code == 404:
-                self._log_progress(f"  ✗ Mod not found on mirror (404)")
+                self._log_progress("  ✗ Mod not found on mirror (404)")
                 return False
             
             if response.status_code != 200:
@@ -242,21 +258,43 @@ class ModDownloader:
             # Download to output path
             downloaded_size = 0
             chunk_size = 8192
-            
+            _cancelled = False
             with open(output_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=chunk_size):
+                    # Cooperative pause: block until resumed
+                    while self._pause_event.is_set():
+                        if self._cancel_event.is_set():
+                            break
+                        time.sleep(0.05)
+                    # Cooperative cancel
+                    if self._cancel_event.is_set():
+                        _cancelled = True
+                        break
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
-                        
+
+                        # Emit byte-level progress for per-file tracking
+                        if self.file_progress_callback and total_size > 0:
+                            self.file_progress_callback(downloaded_size, total_size)
+
                         # Log progress for large files
                         if total_size > 0 and downloaded_size % (chunk_size * 100) == 0:
                             progress_pct = (downloaded_size / total_size) * 100
                             self._log_progress(f"    Progress: {progress_pct:.1f}%")
+
+            if _cancelled:
+                self._log_progress("  ⚠ Download cancelled")
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except OSError:
+                        pass
+                return False
             
             # Verify file was downloaded
             if not output_path.exists():
-                self._log_progress(f"  ✗ Downloaded file not found")
+                self._log_progress("  ✗ Downloaded file not found")
                 return False
             
             file_size = output_path.stat().st_size
@@ -270,7 +308,7 @@ class ModDownloader:
                         self._log_progress(f"  ✗ ZIP file corrupted: {result}")
                         output_path.unlink()
                         return False
-                    self._log_progress(f"  ✓ ZIP file is valid")
+                    self._log_progress("  ✓ ZIP file is valid")
             except Exception as z_err:
                 self._log_progress(f"  ✗ Invalid ZIP file: {z_err}")
                 output_path.unlink()
@@ -283,7 +321,7 @@ class ModDownloader:
             if output_path.exists():
                 try:
                     output_path.unlink()
-                except:
+                except OSError:
                     pass
             return False
 
@@ -327,10 +365,10 @@ class ModDownloader:
         
         # Check for incompatibility warnings
         if all_incompatibilities:
-            self._log_progress(f"\n⚠️  Incompatible mods detected (cannot coexist):")
+            self._log_progress("\n⚠️  Incompatible mods detected (cannot coexist):")
             for incompat in sorted(all_incompatibilities):
                 self._log_progress(f"  - {incompat}")
-            self._log_progress(f"  These mods conflict with selected mods.")
+            self._log_progress("  These mods conflict with selected mods.")
         
         # Check conflicts with already installed mods
         installed_mods = self.get_installed_mods()
@@ -341,17 +379,17 @@ class ModDownloader:
                 conflicts_with_installed.append(f"{mod_name} (installed)")
         
         if conflicts_with_installed:
-            self._log_progress(f"\n⚠️  WARNING: Conflicts with installed mods:")
+            self._log_progress("\n⚠️  WARNING: Conflicts with installed mods:")
             for conflict in conflicts_with_installed:
                 self._log_progress(f"  ⚠️  {conflict}")
-            self._log_progress(f"  Installing may cause issues. Proceed with caution!")
+            self._log_progress("  Installing may cause issues. Proceed with caution!")
         
         # Check for expansion requirements
         if all_expansions:
-            self._log_progress(f"\n💿 Required DLC Expansions:")
+            self._log_progress("\n💿 Required DLC Expansions:")
             for expansion in sorted(all_expansions):
                 self._log_progress(f"  - {expansion}")
-            self._log_progress(f"  Note: These must be purchased and installed manually")
+            self._log_progress("  Note: These must be purchased and installed manually")
         
         self._log_progress(f"\n📦 To download: {len(all_mods)} mods")
         for mod_name in all_mods:

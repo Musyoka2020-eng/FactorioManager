@@ -1,55 +1,31 @@
-"""Thread-safe status manager for concurrent tab operations."""
-from queue import Queue, Empty
-from typing import Callable, Optional
-import threading
+"""Thread-safe status manager — QObject signal-based (replaces daemon thread)."""
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QStatusBar
 
 
-class StatusManager:
-    """Manages status updates from multiple tabs via a queue."""
-    
-    def __init__(self, update_callback: Callable[[str, str], None]):
-        """
-        Initialize status manager.
-        
-        Args:
-            update_callback: Callback function(message, status_type) called to update status
-        """
-        self.status_queue: Queue = Queue()
-        self.update_callback = update_callback
-        self.running = False
-        self.processor_thread = None
-    
+class StatusManager(QObject):
+    """Receives status updates from any thread and forwards to QStatusBar on main thread.
+
+    Usage:
+        manager = StatusManager(self.statusBar())
+        # From any thread (worker QThread):
+        manager.push_status("Downloading...", "info")
+    """
+
+    _status_signal: Signal = Signal(str)
+
+    def __init__(self, status_bar: QStatusBar) -> None:
+        super().__init__()
+        self._status_bar = status_bar
+        # AutoConnection: if emitter is on a different thread, the slot is queued
+        # onto the main thread's event loop automatically.
+        self._status_signal.connect(self._status_bar.showMessage)
+
     def push_status(self, message: str, status_type: str = "info") -> None:
-        """
-        Push a status update to the queue (thread-safe).
-        
-        Args:
-            message: Status message
-            status_type: Type (info, success, error, working)
-        """
-        self.status_queue.put((message, status_type))
-    
-    def start(self, root) -> None:
-        """Start processing status queue updates."""
-        if self.running:
-            return
-        
-        self.running = True
-        
-        def process_queue():
-            while self.running:
-                try:
-                    message, status_type = self.status_queue.get(timeout=0.1)
-                    # Use after_idle to ensure update on main thread
-                    root.after_idle(lambda m=message, s=status_type: self.update_callback(m, s))
-                except Empty:
-                    continue
-                except:
-                    pass
-        
-        self.processor_thread = threading.Thread(target=process_queue, daemon=True)
-        self.processor_thread.start()
-    
-    def stop(self) -> None:
-        """Stop processing status queue."""
-        self.running = False
+        """Emit status update. Thread-safe — can be called from QThread.run()."""
+        self._status_signal.emit(message)
+
+    def clear(self) -> None:
+        """Clear status bar text."""
+        self._status_signal.emit("")
+

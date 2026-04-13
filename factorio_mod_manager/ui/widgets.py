@@ -1,269 +1,296 @@
-"""Custom UI widgets."""
-import tkinter as tk
-from typing import Optional, Callable
+"""Custom UI widgets — Qt implementation."""
+from __future__ import annotations
+
+from typing import Callable, Optional
+
+from PySide6.QtCore import QPropertyAnimation, QTimer, Signal, Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+# Maximum active notifications (DoS mitigation — T-03-02)
+_MAX_ACTIVE = 5
+
+# Icon glyphs per notification type
+_ICONS: dict[str, str] = {
+    "success": "✓",
+    "error": "✗",
+    "warning": "⚠",
+    "info": "ℹ",
+}
+
+# Icon colors per type (matches tokens.py / UI-SPEC.md)
+_ICON_COLORS: dict[str, str] = {
+    "success": "#4ec952",
+    "error": "#d13438",
+    "warning": "#ffad00",
+    "info": "#0078d4",
+}
 
 
-class Notification(tk.Frame):
-    """Toast-style notification widget with auto-dismiss and optional action buttons."""
-    
-    # Color scheme for notification types
-    NOTIFICATION_COLORS = {
-        "success": {"bg": "#2d5016", "fg": "#4ec952", "icon": "✓"},
-        "error": {"bg": "#3a0f0f", "fg": "#d13438", "icon": "✗"},
-        "warning": {"bg": "#3a2f1a", "fg": "#ffad00", "icon": "⚠"},
-        "info": {"bg": "#1a2a3a", "fg": "#0078d4", "icon": "ℹ"},
-    }
-    
+class Notification(QFrame):
+    """Toast-style notification overlay widget with optional auto-dismiss fade.
+
+    Parent must be ``centralWidget()`` (or another container widget).
+    Position is managed externally by ``NotificationManager``.
+    """
+
+    dismissed = Signal()
+
     def __init__(
         self,
-        master,
+        container: QWidget,
         message: str,
         notification_type: str = "info",
         duration_ms: int = 4000,
-        on_dismiss: Optional[Callable] = None,
-        actions: Optional[list] = None,
-        **kwargs
-    ):
-        """
-        Initialize notification widget.
-        
-        Args:
-            master: Parent widget
-            message: Notification message
-            notification_type: Type - "success", "error", "warning", or "info"
-            duration_ms: Duration to show notification before auto-dismiss
-            on_dismiss: Callback function when notification is dismissed
-            actions: List of tuples (label, callback) for action buttons
-        """
-        super().__init__(master, **kwargs)
-        
-        self.message = message
-        self.notification_type = notification_type
-        self.duration_ms = duration_ms
-        self.on_dismiss = on_dismiss
-        self.dismiss_timer = None
-        self.actions = actions or []
-        
-        # Get colors for notification type
-        colors = self.NOTIFICATION_COLORS.get(notification_type, self.NOTIFICATION_COLORS["info"])
-        self.config(bg=colors["bg"], relief="flat", bd=1, highlightthickness=1, highlightbackground=colors["fg"])
-        
-        # Create content frame
-        content_frame = tk.Frame(self, bg=colors["bg"])
-        content_frame.pack(fill="both", expand=True, padx=12, pady=10)
-        
-        # Main horizontal layout: icon+message on left, buttons on right
-        left_frame = tk.Frame(content_frame, bg=colors["bg"])
-        left_frame.pack(side="left", fill="both", expand=True)
-        
-        # Icon
-        icon_label = tk.Label(
-            left_frame,
-            text=colors["icon"],
-            font=("Segoe UI", 14, "bold"),
-            bg=colors["bg"],
-            fg=colors["fg"]
+        actions: Optional[list[tuple[str, Callable]]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(container if parent is None else parent)
+        self._container = container
+        self._duration_ms = duration_ms
+        self._actions = actions or []
+        self._anim: Optional[QPropertyAnimation] = None  # held to prevent GC
+        self._auto_dismiss_timer: Optional[QTimer] = None
+        self._countdown_bar: Optional[QProgressBar] = None
+        self._countdown_timer: Optional[QTimer] = None
+        self._countdown_elapsed: int = 0
+
+        # Apply QSS dynamic property — style().unpolish/polish forces re-evaluation
+        self.setProperty("notifType", notification_type)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        self.setFixedWidth(420)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+
+        self._build_ui(message, notification_type)
+        self.adjustSize()
+
+        # Schedule auto-dismiss using an owned timer so it can be cancelled on early dismiss
+        if duration_ms > 0 and not self._actions:
+            self._auto_dismiss_timer = QTimer(self)
+            self._auto_dismiss_timer.setSingleShot(True)
+            self._auto_dismiss_timer.timeout.connect(self._start_fade)
+            self._auto_dismiss_timer.start(duration_ms)
+        elif duration_ms > 0 and self._actions:
+            # Action toasts: auto-dismiss after timeout with visible countdown bar
+            self._auto_dismiss_timer = QTimer(self)
+            self._auto_dismiss_timer.setSingleShot(True)
+            self._auto_dismiss_timer.timeout.connect(self._dismiss_immediate)
+            self._auto_dismiss_timer.start(duration_ms)
+            self._start_countdown(duration_ms)
+
+    def _build_ui(self, message: str, notification_type: str) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(6)
+
+        # Main row: icon + message + close button
+        main_row = QHBoxLayout()
+        main_row.setSpacing(10)
+
+        icon_label = QLabel(_ICONS.get(notification_type, "ℹ"))
+        icon_label.setStyleSheet(
+            f"font-size: 14pt; font-weight: bold; color: {_ICON_COLORS.get(notification_type, '#0078d4')}; background: transparent;"
         )
-        icon_label.pack(side="left", padx=(0, 10))
-        
-        # Message text
-        text_label = tk.Label(
-            left_frame,
-            text=message,
-            font=("Segoe UI", 10),
-            bg=colors["bg"],
-            fg="#e0e0e0",
-            wraplength=350,
-            justify="left"
+        icon_label.setFixedWidth(20)
+        main_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.msg_label = QLabel(message)
+        self.msg_label.setTextFormat(Qt.TextFormat.PlainText)  # T-02-01: prevent HTML injection from portal data
+        self.msg_label.setWordWrap(True)
+        self.msg_label.setStyleSheet("color: #e0e0e0; background: transparent; font-size: 10pt;")
+        main_row.addWidget(self.msg_label, 1)
+
+        # Close (×) button — always shown
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(20, 20)
+        close_btn.setStyleSheet(
+            "QPushButton { color: #b0b0b0; background: transparent; border: none; font-size: 10pt; }"
+            "QPushButton:hover { color: #ffffff; }"
         )
-        text_label.pack(side="left", fill="both", expand=True)
-        
-        # Right frame for buttons
-        buttons_frame = tk.Frame(content_frame, bg=colors["bg"])
-        buttons_frame.pack(side="right", padx=(12, 0), fill="y")
-        
-        # Add action buttons if provided
-        if self.actions:
-            for label, callback in self.actions:
-                btn = tk.Button(
-                    buttons_frame,
-                    text=label,
-                    command=lambda cb=callback: self._action_click(cb),
-                    bg="#0078d4",
-                    fg="#ffffff",
-                    activebackground="#1084d7",
-                    activeforeground="#ffffff",
-                    relief="flat",
-                    padx=14,
-                    pady=5,
-                    font=("Segoe UI", 10, "bold"),
-                    cursor="hand2",
-                    bd=0,
-                    highlightthickness=0,
-                    width=10,
-                    anchor="center"
-                )
-                btn.pack(side="left", padx=3)
-        
-        # Close button (X)
-        close_btn = tk.Label(
-            buttons_frame,
-            text="✕",
-            font=("Segoe UI", 12, "bold"),
-            bg=colors["bg"],
-            fg=colors["fg"],
-            cursor="hand2",
-            padx=6,
-            pady=2
-        )
-        close_btn.pack(side="left", padx=(6, 0))
-        close_btn.bind("<Button-1>", lambda e: self.dismiss())
-        close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#ffffff"))
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg=colors["fg"]))
-        
-        # Schedule auto-dismiss only if no actions (persistent if has actions)
-        if duration_ms > 0 and not self.actions:
-            self.dismiss_timer = self.after(duration_ms, self.dismiss)
-    
+        close_btn.clicked.connect(self._dismiss_immediate)
+        main_row.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        outer.addLayout(main_row)
+
+        # Action buttons row (persistent toasts)
+        if self._actions:
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(8)
+            btn_row.addStretch()
+            for label, callback in self._actions:
+                btn = QPushButton(label)
+                if label.lower() in ("delete", "remove", "confirm"):
+                    btn.setObjectName("destructiveButton")
+                btn.clicked.connect(lambda _checked=False, cb=callback: self._action_click(cb))
+                btn_row.addWidget(btn)
+            outer.addLayout(btn_row)
+
+            # Countdown progress bar — filled initially, drains to 0
+            self._countdown_bar = QProgressBar()
+            self._countdown_bar.setTextVisible(False)
+            self._countdown_bar.setFixedHeight(3)
+            self._countdown_bar.setStyleSheet(
+                "QProgressBar { border: none; background: transparent; border-radius: 0px; }"
+                "QProgressBar::chunk { background: rgba(255,255,255,0.25); border-radius: 0px; }"
+            )
+            outer.addWidget(self._countdown_bar)
+
+    def _start_countdown(self, duration_ms: int) -> None:
+        """Start 100ms-tick timer that drains the countdown bar."""
+        if self._countdown_bar is None:
+            return
+        self._countdown_bar.setRange(0, duration_ms)
+        self._countdown_bar.setValue(duration_ms)
+        self._countdown_elapsed = 0
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(100)
+        self._countdown_timer.timeout.connect(self._on_countdown_tick)
+        self._countdown_timer.start()
+
+    def _on_countdown_tick(self) -> None:
+        if self._countdown_bar is None or self._countdown_timer is None:
+            return
+        self._countdown_elapsed += 100
+        remaining = max(0, self._duration_ms - self._countdown_elapsed)
+        self._countdown_bar.setValue(remaining)
+
     def _action_click(self, callback: Callable) -> None:
-        """Handle action button click."""
-        # Call the action callback
-        callback()
-        # Auto-dismiss after action
-        self.dismiss()
-    
-    def dismiss(self) -> None:
-        """Dismiss the notification."""
-        if self.dismiss_timer:
-            self.after_cancel(self.dismiss_timer)
-        
-        if self.on_dismiss:
-            self.on_dismiss()
-        
-        self.destroy()
+        """Invoke action callback then dismiss."""
+        try:
+            callback()
+        finally:
+            self._dismiss_immediate()
+
+    def _start_fade(self) -> None:
+        """Begin 300ms opacity fade-out, then deleteLater."""
+        effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(effect)
+        self._anim = QPropertyAnimation(effect, b"opacity", self)
+        self._anim.setDuration(300)
+        self._anim.setStartValue(1.0)
+        self._anim.setEndValue(0.0)
+        self._anim.finished.connect(self._on_fade_finished)
+        self._anim.start()
+
+    def _on_fade_finished(self) -> None:
+        self.dismissed.emit()
+        self.deleteLater()
+
+    def _dismiss_immediate(self) -> None:
+        """Skip fade; delete immediately."""
+        if self._auto_dismiss_timer is not None:
+            self._auto_dismiss_timer.stop()
+            self._auto_dismiss_timer = None
+        if self._countdown_timer is not None:
+            self._countdown_timer.stop()
+            self._countdown_timer = None
+        if self._anim is not None:
+            self._anim.stop()
+        self.dismissed.emit()
+        self.deleteLater()
+
+    def update_message(self, new_message: str) -> None:
+        """Update the displayed message text without recreating the widget."""
+        if hasattr(self, 'msg_label'):
+            self.msg_label.setText(new_message)
+            self.msg_label.setTextFormat(Qt.TextFormat.PlainText)
+            self.msg_label.adjustSize()
+            self.adjustSize()
 
 
 class NotificationManager:
-    """Manages notifications in a container."""
-    
-    def __init__(self, root_window, max_notifications: int = 5):
-        """
-        Initialize notification manager.
-        
-        Args:
-            root_window: Root Tkinter window
-            max_notifications: Maximum notifications to show at once
-        """
-        self.root = root_window
-        self.max_notifications = max_notifications
-        self.notifications = []
-        self.container = None
-    
-    def _ensure_container(self) -> None:
-        """Create notification container if it doesn't exist."""
-        if self.container is None:
-            self.container = tk.Frame(self.root, bg="#0e0e0e")
-            # Center horizontally, positioned below header with wider width for buttons
-            self.container.place(relx=0.5, y=70, anchor="n", width=700)
-            self.container.lift()  # Bring to front
-            self.root.update_idletasks()
-    
-    def _cleanup_container(self) -> None:
-        """Remove container if no notifications left."""
-        if self.container and len(self.notifications) == 0 and self.container.winfo_exists():
-            self.container.place_forget()
-            self.container = None
-    
+    """Positions and manages a stack of Notification toasts anchored top-right.
+
+    Toasts are children of ``container`` (``centralWidget()``).
+    Call ``reposition_all()`` from ``MainWindow.resizeEvent``.
+    """
+
+    _SEVERITY_DURATIONS: dict[str, int] = {
+        "success": 2800,
+        "info": 2800,
+        "warning": 4200,
+        "error": 5600,
+    }
+
+    def __init__(self, container: QWidget) -> None:
+        self._container = container
+        self._active: list[Notification] = []
+        self._keyed: dict[str, Notification] = {}
+
     def show(
         self,
         message: str,
         notification_type: str = "info",
-        duration_ms: int = 4000,
-        actions: Optional[list] = None
+        duration_ms: int = -1,
+        actions: Optional[list[tuple[str, Callable]]] = None,
+        event_key: Optional[str] = None,
     ) -> Notification:
-        """
-        Show a notification.
-        
-        Args:
-            message: Notification message
-            notification_type: Type - "success", "error", "warning", or "info"
-            duration_ms: Duration to show (0 = persistent)
-            actions: List of tuples (label, callback) for action buttons
-            
-        Returns:
-            Notification widget instance
-        """
-        self._ensure_container()
-        
-        # Remove old notifications if at max
-        if len(self.notifications) >= self.max_notifications:
-            old_notif = self.notifications.pop(0)
-            if old_notif.winfo_exists():
-                old_notif.destroy()
-        
-        def on_dismiss():
-            if notification in self.notifications:
-                self.notifications.remove(notification)
-            # Cleanup container if empty
-            self._cleanup_container()
-        
-        notification = Notification(
-            self.container,
-            message,
+        """Create and display a toast notification."""
+        # Resolve duration from severity map when caller did not supply an explicit value
+        if duration_ms == -1:
+            duration_ms = self._SEVERITY_DURATIONS.get(notification_type, 3500)
+
+        # Deduplicate by event_key BEFORE cap check: dismiss existing same-keyed toast (D-11)
+        if event_key is not None and event_key in self._keyed:
+            existing = self._keyed.pop(event_key)
+            if existing in self._active:
+                existing._dismiss_immediate()
+
+        # DoS mitigation (T-03-02): evict oldest auto-dismiss toast if at cap
+        if len(self._active) >= _MAX_ACTIVE:
+            oldest = next(
+                (n for n in self._active if n._duration_ms > 0 and not n._actions),
+                self._active[0],
+            )
+            oldest._dismiss_immediate()
+
+        notif = Notification(
+            container=self._container,
+            message=message,
             notification_type=notification_type,
             duration_ms=duration_ms,
-            on_dismiss=on_dismiss,
-            actions=actions
+            actions=actions,
         )
-        notification.pack(fill="x", pady=4)
-        self.notifications.append(notification)
-        
-        # Update display
-        self.root.update_idletasks()
-        
-        return notification
+        notif.dismissed.connect(lambda: self._on_dismissed(notif))
+        self._active.append(notif)
+        if event_key is not None:
+            self._keyed[event_key] = notif
+        notif.show()
+        notif.raise_()
+        self.reposition_all()
+        return notif
 
+    def reposition_all(self) -> None:
+        """Snap all active toasts to top-right of container, stacked vertically."""
+        right_margin = 16
+        top_start = 16
+        gap = 8
 
-class PlaceholderEntry(tk.Entry):
-    """Entry widget with placeholder text support."""
-    
-    def __init__(self, master, placeholder="", placeholder_color="#888888", *args, **kwargs):
-        """Initialize with placeholder support.
-        
-        Args:
-            master: Parent widget
-            placeholder: Placeholder text to display
-            placeholder_color: Color for placeholder text
-        """
-        super().__init__(master, *args, **kwargs)
-        self.placeholder = placeholder
-        self.placeholder_color = placeholder_color
-        self.default_color = self["fg"]
-        
-        self.bind("<FocusIn>", self._on_focus_in)
-        self.bind("<FocusOut>", self._on_focus_out)
-        
-        # Show placeholder on init
-        self._show_placeholder()
-    
-    def _show_placeholder(self):
-        """Show placeholder text."""
-        if not self.get():
-            self.insert(0, self.placeholder)
-            self.config(fg=self.placeholder_color)
-    
-    def _on_focus_in(self, event):
-        """Remove placeholder on focus."""
-        if self.get() == self.placeholder:
-            self.delete(0, "end")
-            self.config(fg=self.default_color)
-    
-    def _on_focus_out(self, event):
-        """Show placeholder if empty on focus out."""
-        if not self.get():
-            self._show_placeholder()
-    
-    def get_text(self):
-        """Get actual text without placeholder."""
-        text = self.get()
-        return "" if text == self.placeholder else text
+        y = top_start
+        for notif in list(self._active):
+            if notif.isVisible():
+                x = self._container.width() - notif.width() - right_margin
+                notif.move(x, y)
+                notif.raise_()
+                y += notif.height() + gap
+
+    def _on_dismissed(self, notif: Notification) -> None:
+        """Remove dismissed toast from active list and restack."""
+        if notif in self._active:
+            self._active.remove(notif)
+        # Remove from keyed index if present
+        to_remove = [k for k, v in self._keyed.items() if v is notif]
+        for k in to_remove:
+            del self._keyed[k]
+        self.reposition_all()

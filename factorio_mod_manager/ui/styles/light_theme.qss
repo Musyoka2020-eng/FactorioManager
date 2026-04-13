@@ -1,0 +1,948 @@
+/* ============================================================
+   Factorio Mod Manager — Light Theme QSS
+   Parameterized: {{TOKEN_NAME}} → tokens.py values
+   All widget styling goes here. Never use inline setStyleSheet().
+   Named selectors used for Phase 3 Fluent override path.
+   ============================================================ */
+
+/* ── Base ─────────────────────────────────────────────────── */
+QMainWindow,
+QWidget {{
+    background-color: {LIGHT_BG_PRIMARY};
+    color: {LIGHT_FG_PRIMARY};
+    font-family: "Segoe UI";
+    font-size: 10pt;
+}}
+
+QDialog {{
+    background-color: {LIGHT_BG_PRIMARY};
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+/* ── Tab Widget ───────────────────────────────────────────── */
+QTabWidget::pane {{
+    border: none;
+    background-color: {LIGHT_BG_PRIMARY};
+}}
+
+QTabBar::tab {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_SECONDARY};
+    padding: {SPACING_SM}px {SPACING_LG}px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-width: 120px;
+}}
+
+QTabBar::tab:selected {{
+    background-color: {LIGHT_BG_PRIMARY};
+    color: {LIGHT_FG_PRIMARY};
+    border-bottom: 2px solid {LIGHT_ACCENT};
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+QPushButton {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    padding: 5px {SPACING_MD}px;
+    border-radius: 3px;
+}}
+
+QPushButton:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    border: 1px solid {LIGHT_BORDER_HOVER};
+}}
+
+QPushButton:pressed {{
+    background-color: {LIGHT_BTN_PRESSED_BG};
+    border: 1px solid {LIGHT_BORDER_HOVER};
+}}
+
+QPushButton:disabled {{
+    background-color: {LIGHT_BG_INPUT_READONLY};
+    color: {LIGHT_FG_DISABLED};
+    border: 1px solid {LIGHT_BORDER_READONLY};
+}}
+
+QPushButton#accentButton {{
+    background-color: {LIGHT_ACCENT};
+    color: #ffffff;
+    border: none;
+    font-weight: bold;
+    padding: 6px {SPACING_LG}px;
+}}
+
+QPushButton#accentButton:hover {{
+    background-color: {LIGHT_ACCENT_HOVER};
+}}
+
+QPushButton#accentButton:pressed {{
+    background-color: {LIGHT_ACCENT_PRESSED};
+}}
+
+QPushButton#accentButton:disabled {{
+    background-color: {LIGHT_ACCENT_DISABLED_BG};
+    color: {LIGHT_FG_DISABLED};
+}}
+
+QPushButton#destructiveButton {{
+    background-color: {LIGHT_BTN_DESTR_BG};
+    color: {LIGHT_ERROR};
+    border: 1px solid {LIGHT_BTN_DESTR_BG};
+}}
+
+QPushButton#destructiveButton:hover {{
+    background-color: {LIGHT_BTN_DESTR_HOVER_BG};
+}}
+
+QPushButton#destructiveButton:pressed {{
+    background-color: {LIGHT_BTN_DESTR_PRESSED_BG};
+}}
+
+/* ── Line Edits ───────────────────────────────────────────── */
+QLineEdit {{
+    background-color: {LIGHT_BG_INPUT};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    padding: 4px {SPACING_SM}px;
+    border-radius: 3px;
+    selection-background-color: {LIGHT_ACCENT};
+}}
+
+QLineEdit:focus {{
+    border: 1px solid {LIGHT_BORDER_FOCUS};
+}}
+
+QLineEdit:read-only {{
+    background-color: {LIGHT_BG_INPUT_READONLY};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_READONLY};
+}}
+
+QLineEdit::placeholder {{
+    color: {LIGHT_FG_SECONDARY};
+}}
+
+/* ── Text Edit (log / progress console) ──────────────────── */
+QTextEdit {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+    padding: {SPACING_XS}px;
+    selection-background-color: {LIGHT_ACCENT};
+}}
+
+QTextEdit:focus {{
+    border: 1px solid {LIGHT_BORDER_FOCUS};
+}}
+
+/* ── Progress Bar ─────────────────────────────────────────── */
+QProgressBar {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+    text-align: center;
+    color: {LIGHT_FG_PRIMARY};
+    height: 18px;
+}}
+
+QProgressBar::chunk {{
+    background-color: {LIGHT_ACCENT};
+    border-radius: 2px;
+}}
+
+QProgressBar[completed="true"]::chunk {{
+    background-color: {LIGHT_SUCCESS};
+}}
+
+QProgressBar[error="true"]::chunk {{
+    background-color: {LIGHT_ERROR};
+}}
+
+/* ── Table Widget ─────────────────────────────────────────── */
+QTableWidget {{
+    background-color: {LIGHT_BG_PRIMARY};
+    color: {LIGHT_FG_PRIMARY};
+    gridline-color: {LIGHT_BORDER_DEFAULT};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    selection-background-color: {LIGHT_TABLE_SELECTED_BG};
+    selection-color: {LIGHT_FG_PRIMARY};
+    alternate-background-color: {LIGHT_BG_ROW_ALT};
+}}
+
+QTableWidget::item {{
+    padding: {SPACING_XS}px {SPACING_SM}px;
+    border: none;
+}}
+
+QTableWidget::item:selected {{
+    background-color: {LIGHT_TABLE_SELECTED_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+QHeaderView::section {{
+    background-color: {LIGHT_TABLE_HEADER_BG};
+    color: {LIGHT_FG_SECONDARY};
+    padding: {SPACING_XS}px {SPACING_SM}px;
+    border: none;
+    border-bottom: 1px solid {LIGHT_BORDER_DEFAULT};
+    font-weight: normal;
+}}
+
+QHeaderView::section:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Check Box ────────────────────────────────────────────── */
+QCheckBox {{
+    color: {LIGHT_FG_PRIMARY};
+    spacing: {SPACING_XS}px;
+}}
+
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 2px;
+    background-color: {LIGHT_BG_PANEL};
+}}
+
+QCheckBox::indicator:checked {{
+    background-color: {LIGHT_ACCENT};
+    border: 1px solid {LIGHT_ACCENT};
+}}
+
+QCheckBox::indicator:hover {{
+    border: 1px solid {LIGHT_BORDER_HOVER};
+}}
+
+/* ── Radio Button ─────────────────────────────────────────── */
+QRadioButton {{
+    color: {LIGHT_FG_PRIMARY};
+    spacing: {SPACING_XS}px;
+}}
+
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 7px;
+    background-color: {LIGHT_BG_PANEL};
+}}
+
+QRadioButton::indicator:checked {{
+    background-color: {LIGHT_ACCENT};
+    border: 1px solid {LIGHT_ACCENT};
+}}
+
+/* ── Frame ────────────────────────────────────────────────── */
+QFrame {{
+    background-color: {LIGHT_BG_PANEL};
+    border: none;
+}}
+
+QFrame#headerSeparator {{
+    background-color: {LIGHT_ACCENT};
+    max-height: 1px;
+    min-height: 1px;
+    border: none;
+}}
+
+QLabel#headerTitle {{
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+QLabel#headerSubtitle {{
+    color: {LIGHT_FG_SECONDARY};
+}}
+
+/* ── Group Box ────────────────────────────────────────────── */
+QGroupBox {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    margin-top: 16px;
+    padding: {SPACING_SM}px;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 {SPACING_XS}px;
+    color: {LIGHT_FG_SECONDARY};
+}}
+
+/* ── Splitter ─────────────────────────────────────────────── */
+QSplitter::handle {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+    width: 1px;
+}}
+
+/* ── Scroll Bar ───────────────────────────────────────────── */
+QScrollBar:vertical {{
+    background-color: {LIGHT_BG_PANEL};
+    width: 10px;
+    border: none;
+}}
+
+QScrollBar::handle:vertical {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+
+QScrollBar::handle:vertical:hover {{
+    background-color: {LIGHT_FG_SECONDARY};
+}}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+QScrollBar:horizontal {{
+    background-color: {LIGHT_BG_PANEL};
+    height: 10px;
+    border: none;
+}}
+
+QScrollBar::handle:horizontal {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    min-width: 20px;
+}}
+
+QScrollBar::handle:horizontal:hover {{
+    background-color: {LIGHT_FG_SECONDARY};
+}}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {{
+    width: 0px;
+}}
+
+/* ── Status Bar ───────────────────────────────────────────── */
+QStatusBar {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_SECONDARY};
+    border-top: 1px solid {LIGHT_BORDER_DEFAULT};
+    font-size: 9pt;
+    min-height: {STATUS_BAR_HEIGHT}px;
+    max-height: {STATUS_BAR_HEIGHT}px;
+}}
+
+/* ── Notification Frames (dynamic property selectors) ─────── */
+QFrame[notifType="success"] {{
+    background-color: {LIGHT_NOTIF_BG_SUCCESS};
+    border: 1px solid {LIGHT_SUCCESS};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="error"] {{
+    background-color: {LIGHT_NOTIF_BG_ERROR};
+    border: 1px solid {LIGHT_ERROR};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="warning"] {{
+    background-color: {LIGHT_NOTIF_BG_WARNING};
+    border: 1px solid {LIGHT_WARNING};
+    border-radius: 4px;
+}}
+
+QFrame[notifType="info"] {{
+    background-color: {LIGHT_NOTIF_BG_INFO};
+    border: 1px solid {LIGHT_ACCENT};
+    border-radius: 4px;
+}}
+
+/* ── Scroll Area ──────────────────────────────────────────── */
+QScrollArea {{
+    border: none;
+    background-color: transparent;
+}}
+
+QScrollArea > QWidget > QWidget {{
+    background-color: {LIGHT_BG_PRIMARY};
+}}
+
+/* -- Left Rail Navigation ---------------------------------- */
+QFrame#navRail {{
+    background-color: {LIGHT_BG_PANEL};
+    border-right: 1px solid {LIGHT_BORDER_DEFAULT};
+    min-width: {NAV_RAIL_WIDTH}px;
+    max-width: {NAV_RAIL_WIDTH}px;
+}}
+
+QPushButton#navItem {{
+    background-color: transparent;
+    color: {LIGHT_FG_SECONDARY};
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 10px {SPACING_LG}px;
+    text-align: left;
+    font-size: 10pt;
+    font-weight: normal;
+}}
+
+QPushButton#navItem:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+QPushButton#navItem:checked {{
+    background-color: {LIGHT_BG_PRIMARY};
+    color: {LIGHT_ACCENT};
+    border-left: 3px solid {LIGHT_ACCENT};
+    font-weight: 600;
+}}
+
+/* -- Page Header Zone -------------------------------------- */
+QWidget#pageHeader {{
+    background-color: {LIGHT_BG_PRIMARY};
+    min-height: {PAGE_HEADER_HEIGHT}px;
+    max-height: {PAGE_HEADER_HEIGHT}px;
+}}
+
+QLabel#pageTitle {{
+    font-size: 20pt;
+    font-weight: 600;
+    color: {LIGHT_FG_PRIMARY};
+    background: transparent;
+    border: none;
+}}
+
+/* -- Info Card (Downloader mod details) -------------------- */
+QFrame#infoCard {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+}}
+
+QLabel#modTitle {{
+    font-size: 14pt;
+    font-weight: 600;
+    color: {LIGHT_FG_PRIMARY};
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modAuthor {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modMeta {{
+    color: {LIGHT_FG_DISABLED};
+    font-size: 9pt;
+    background: transparent;
+    border: none;
+}}
+
+QLabel#modSummary {{
+    color: {LIGHT_FG_PRIMARY};
+    font-size: 10pt;
+    background: transparent;
+    border: none;
+}}
+
+QFrame#depDivider {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}}
+
+QLabel#depsHeader {{
+    font-size: 9pt;
+    font-weight: 600;
+    color: {LIGHT_FG_SECONDARY};
+    background: transparent;
+    border: none;
+}}
+
+/* -- Side Panel -------------------------------------------- */
+QFrame#sidePanel {{
+    background-color: {LIGHT_BG_PANEL};
+    border-left: 1px solid {LIGHT_BORDER_DEFAULT};
+    min-width: {SIDE_PANEL_WIDTH}px;
+
+}}
+
+/* -- Feedback Rail ----------------------------------------- */
+QFrame#feedbackRail {{
+    background-color: {LIGHT_BG_PANEL};
+    border-top: 1px solid {LIGHT_BORDER_DEFAULT};
+    min-height: {STATUS_BAR_HEIGHT}px;
+    max-height: {STATUS_BAR_HEIGHT}px;
+}}
+
+QLabel#checkerStatusLabel[statusType="ready"] {{
+    color: {LIGHT_SUCCESS};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="busy"] {{
+    color: {LIGHT_ACCENT};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="warning"] {{
+    color: {LIGHT_WARNING};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="error"] {{
+    color: {LIGHT_ERROR};
+    font-size: 11px;
+}}
+
+QLabel#checkerStatusLabel[statusType="neutral"] {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 11px;
+}}
+
+/* ── Phase 3: ComboBox ────────────────────────────────────── */
+QComboBox {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    padding: 4px {SPACING_SM}px;
+    border-radius: 3px;
+}}
+QComboBox:focus {{
+    border: 1px solid {LIGHT_BORDER_FOCUS};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 20px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    selection-background-color: {LIGHT_ACCENT};
+    selection-color: #ffffff;
+}}
+
+/* ── Phase 3: SpinBox ─────────────────────────────────────── */
+QSpinBox {{
+    background-color: {LIGHT_BG_INPUT};
+    color: {LIGHT_FG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    padding: 4px {SPACING_SM}px;
+    border-radius: 3px;
+}}
+QSpinBox:focus {{
+    border: 1px solid {LIGHT_BORDER_FOCUS};
+}}
+QSpinBox::up-button,
+QSpinBox::down-button {{
+    background-color: {LIGHT_BG_PANEL};
+    border: none;
+    width: 16px;
+}}
+QSpinBox::up-button:hover,
+QSpinBox::down-button:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Phase 3: Global Search Bar ──────────────────────────── */
+QLineEdit#globalSearchBar {{
+    background-color: {LIGHT_BG_INPUT};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    padding: 4px 12px;
+    min-width: 200px;
+    max-width: 300px;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLineEdit#globalSearchBar:focus {{
+    border: 1px solid {LIGHT_BORDER_FOCUS};
+}}
+
+/* ── Phase 3: Category Chips ──────────────────────────────── */
+QPushButton#categoryChip {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 9pt;
+}}
+QPushButton#categoryChip:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+QPushButton#categoryChip[selected="true"] {{
+    background-color: {LIGHT_ACCENT};
+    color: #ffffff;
+    border: 1px solid {LIGHT_ACCENT};
+}}
+
+/* ── Mod Browse Cards ─────────────────────────────────────── */
+QFrame#modBrowseCard {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    padding: 2px;
+}}
+QFrame#modBrowseCard:hover {{
+    border-color: {LIGHT_BORDER_HOVER};
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+QLabel#modCardTitle {{
+    font-weight: 600;
+    color: {LIGHT_FG_PRIMARY};
+    font-size: 10pt;
+}}
+QLabel#modCardMeta {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QLabel#modCardSummary {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QLabel#modCardCategory {{
+    color: {LIGHT_ACCENT};
+    font-size: 8pt;
+    border: 1px solid {LIGHT_ACCENT};
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+
+/* ── Mod browse card status badges (Installed / Update) ────── */
+QLabel#modCardInstalled {{
+    color: {LIGHT_SUCCESS};
+    background-color: {LIGHT_NOTIF_BG_SUCCESS};
+    border: 1px solid {LIGHT_SUCCESS};
+    font-size: 7pt;
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+QLabel#modCardUpdate {{
+    color: {LIGHT_WARNING};
+    background-color: {LIGHT_NOTIF_BG_WARNING};
+    border: 1px solid {LIGHT_WARNING};
+    font-size: 7pt;
+    border-radius: 3px;
+    padding: 1px 4px;
+}}
+
+/* ── Pagination bar ───────────────────────────────────────── */
+QPushButton#paginationBtn {{
+    background-color: {LIGHT_BG_PANEL};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    padding: 3px 12px;
+    font-size: 9pt;
+}}
+QPushButton#paginationBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+}}
+QPushButton#paginationBtn:disabled {{
+    color: {LIGHT_FG_DISABLED};
+    border-color: {LIGHT_BORDER_DEFAULT};
+}}
+QLabel#paginationLabel {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+
+/* ── Dependency rows ───────────────────────────────────────── */
+QLabel#depSectionHdr {{
+    color: {LIGHT_FG_PRIMARY};
+    font-weight: 600;
+    font-size: 9pt;
+    margin-top: 4px;
+}}
+QLabel#depRow {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+    padding-left: 4px;
+}}
+QLabel#depRowIncompat {{
+    color: #a80000;
+    font-size: 9pt;
+    padding-left: 4px;
+}}
+QCheckBox#depOptCheckbox {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QCheckBox#depOptCheckbox::checked {{
+    color: {LIGHT_FG_PRIMARY};
+}}
+
+/* ── Conflict detection panel ────────────────────────────── */
+QFrame#conflictSection {{
+    background-color: rgba(200, 120, 0, 0.08);
+    border: 1px solid rgba(200, 120, 0, 0.35);
+    border-radius: 4px;
+    margin-top: 4px;
+}}
+QLabel#conflictHeader {{
+    color: {LIGHT_WARNING};
+    font-weight: 600;
+    font-size: 9pt;
+}}
+QLabel#conflictModName {{
+    color: {LIGHT_WARNING};
+    font-size: 9pt;
+}}
+QPushButton#conflictDisableBtn {{
+    color: {LIGHT_WARNING};
+    font-size: 9pt;
+    padding: 1px 4px;
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+}}
+QPushButton#conflictDisableBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Per-card progress bar in queue drawer ───────────────── */
+QProgressBar#cardProgressBar {{
+    border: none;
+    border-radius: 2px;
+    background-color: {LIGHT_BORDER_DEFAULT};
+    max-height: 6px;
+    min-height: 6px;
+    text-align: center;
+}}
+QProgressBar#cardProgressBar::chunk {{
+    background-color: {LIGHT_ACCENT};
+    border-radius: 2px;
+}}
+
+/* ── Phase 3: Settings Button (header utility zone) ──────── */
+QPushButton#settingsButton {{
+    background-color: transparent;
+    border: none;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 14pt;
+    padding: 2px {SPACING_XS}px;
+    min-width: 28px;
+    max-width: 28px;
+    border-radius: 4px;
+}}
+QPushButton#settingsButton:hover {{
+    color: {LIGHT_FG_PRIMARY};
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Refresh Button (header utility zone + per-tab headers) ── */
+QPushButton#refreshButton {{
+    background-color: transparent;
+    border: none;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 14pt;
+    padding: 2px {SPACING_XS}px;
+    min-width: 28px;
+    max-width: 28px;
+    border-radius: 4px;
+}}
+QPushButton#refreshButton:hover {{
+    color: {LIGHT_FG_PRIMARY};
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+QPushButton#refreshButton:disabled {{
+    color: {LIGHT_FG_DISABLED};
+}}
+
+/* ── Phase 3: Settings Scroll Area ───────────────────────── */
+QScrollArea {{
+    background-color: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background-color: transparent;
+}}
+
+/* ── Phase 4: Queue Badge ──────────────────────────────────── */
+QPushButton#queueBadge {{
+    background-color: {LIGHT_QUEUE_BADGE_BG};
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 4px;
+    font-size: 9pt;
+    padding: 2px {SPACING_XS}px;
+    min-width: {QUEUE_BADGE_SIZE}px;
+    max-width: {QUEUE_BADGE_SIZE}px;
+    min-height: {QUEUE_BADGE_SIZE}px;
+    max-height: {QUEUE_BADGE_SIZE}px;
+}}
+QPushButton#queueBadge[active="true"] {{
+    background-color: {LIGHT_QUEUE_BADGE_ACTIVE_BG};
+    color: #ffffff;
+    border: 1px solid {LIGHT_QUEUE_BADGE_ACTIVE_BG};
+}}
+QPushButton#queueBadge:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+}}
+
+/* ── Phase 4: Queue Drawer ─────────────────────────────────── */
+QFrame#queueDrawer {{
+    background-color: {LIGHT_BG_PANEL};
+    border-left: 1px solid {LIGHT_BORDER_DEFAULT};
+}}
+
+/* ── Phase 4: Queue Item Card ──────────────────────────────── */
+QFrame#queueCard {{
+    background-color: {LIGHT_BG_INPUT};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+    padding: {SPACING_SM}px;
+}}
+QLabel#cardLabel {{
+    color: {LIGHT_FG_PRIMARY};
+    font-size: 9pt;
+}}
+QLabel#cardError {{
+    color: {LIGHT_ERROR};
+    font-size: 8pt;
+}}
+QPushButton#cardActionBtn {{
+    background-color: transparent;
+    color: {LIGHT_FG_SECONDARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: 3px;
+    font-size: 8pt;
+    padding: 2px 8px;
+}}
+QPushButton#cardActionBtn:hover {{
+    background-color: {LIGHT_BTN_HOVER_BG};
+    color: {LIGHT_FG_PRIMARY};
+    border-color: {LIGHT_BORDER_HOVER};
+}}
+
+/* ── Phase 4: Queue Inline Strip ───────────────────────────── */
+QFrame#queueStrip {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+    padding: {SPACING_XS}px {SPACING_SM}px;
+}}
+
+/* ── Phase 4: Queue State Chips ────────────────────────────── */
+QLabel#chipQueued {{
+    background-color: {LIGHT_QUEUE_CHIP_QUEUED_BG};
+    color: {LIGHT_ACCENT};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipRunning {{
+    background-color: {LIGHT_QUEUE_CHIP_RUNNING_BG};
+    color: {LIGHT_ACCENT};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipPaused {{
+    background-color: {LIGHT_QUEUE_CHIP_PAUSED_BG};
+    color: {LIGHT_WARNING};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipCompleted {{
+    background-color: {LIGHT_QUEUE_CHIP_COMPLETED_BG};
+    color: {LIGHT_SUCCESS};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipFailed {{
+    background-color: {LIGHT_QUEUE_CHIP_FAILED_BG};
+    color: {LIGHT_ERROR};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+QLabel#chipCanceled {{
+    background-color: {LIGHT_QUEUE_CHIP_CANCELED_BG};
+    color: {LIGHT_FG_DISABLED};
+    border-radius: {QUEUE_CHIP_RADIUS}px;
+    padding: 1px {SPACING_SM}px;
+    font-size: 8pt;
+}}
+
+/* ── Phase 4: Diff Preview List ────────────────────────────── */
+QFrame#diffPreviewPanel {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#diffActionAdd {{ color: {LIGHT_SUCCESS}; font-weight: bold; }}
+QLabel#diffActionRemove {{ color: {LIGHT_ERROR}; font-weight: bold; }}
+QLabel#diffActionEnable {{ color: {LIGHT_ACCENT}; }}
+QLabel#diffActionDisable {{ color: {LIGHT_WARNING}; }}
+QLabel#diffActionDownload {{ color: {LIGHT_FG_SECONDARY}; }}
+
+/* ── Phase 4: Profile Library Dialog ──────────────── */
+QFrame#profileLibraryCard {{
+    background-color: {LIGHT_BG_PANEL};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#sectionHeader {{
+    font-weight: bold;
+    font-size: 10pt;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#sectionDescription {{
+    color: {LIGHT_FG_SECONDARY};
+}}
+QLabel#presetFamilyName {{
+    font-weight: bold;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#presetFamilyDesc {{
+    color: {LIGHT_FG_SECONDARY};
+}}
+
+/* ── Phase 4: Profile Apply Dialog ───────────────────── */
+QWidget#applyDialogRail {{
+    background-color: {LIGHT_BG_PANEL};
+    border-right: 1px solid {LIGHT_BORDER_DEFAULT};
+}}
+QLabel#applyProfileTitle {{
+    font-size: 11pt;
+    font-weight: bold;
+    color: {LIGHT_FG_PRIMARY};
+}}
+QLabel#applyProfileSub {{
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QWidget#applyDialogRight {{
+    background-color: {LIGHT_BG_PRIMARY};
+}}
+QListWidget#diffList {{
+    background-color: {LIGHT_BG_PRIMARY};
+    border: 1px solid {LIGHT_BORDER_DEFAULT};
+    border-radius: {QUEUE_CARD_RADIUS}px;
+}}
+QLabel#diffListLabel {{
+    font-weight: bold;
+    color: {LIGHT_FG_SECONDARY};
+    font-size: 9pt;
+}}
+QWidget#applyDialogDivider {{
+    background-color: {LIGHT_BORDER_DEFAULT};
+}}

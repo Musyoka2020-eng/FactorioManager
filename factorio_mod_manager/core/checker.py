@@ -28,8 +28,8 @@ class ModChecker:
             token: Factorio API token
         """
         self.mods_folder = Path(mods_folder)
-        self.portal = FactorioPortalAPI(username, token)
-        self.downloader = ModDownloader(str(self.mods_folder), username, token)
+        self.portal = FactorioPortalAPI()
+        self.downloader = ModDownloader(str(self.mods_folder))
         self.mods: Dict[str, Mod] = {}
         self.last_update_check: Optional[datetime] = None
         
@@ -62,24 +62,35 @@ class ModChecker:
             self._log_progress(f"Mods folder not found: {self.mods_folder}")
             return self.mods
         
-        mod_files = list(self.mods_folder.glob("*.zip"))
-        self._log_progress(f"Found {len(mod_files)} mod files")
-        
+        # Collect both active (.zip) and disabled (.zip.bak) mod files
+        zip_files = list(self.mods_folder.glob("*.zip"))
+        bak_files = list(self.mods_folder.glob("*.zip.bak"))
+        mod_files = zip_files + bak_files
+        self._log_progress(
+            f"Found {len(zip_files)} active mod(s), {len(bak_files)} disabled mod(s)"
+        )
+
         # First pass: parse local mod info
         local_mods = {}
         for mod_file in mod_files:
             try:
-                # Parse filename: modname_version.zip
-                filename = mod_file.stem
-                if '_' in filename:
-                    name, version = filename.rsplit('_', 1)
+                file_name = mod_file.name
+                if file_name.endswith(".zip.bak"):
+                    is_enabled = False
+                    stem = file_name[: -len(".zip.bak")]
                 else:
-                    name = filename
+                    is_enabled = True
+                    stem = mod_file.stem  # strip .zip
+
+                if "_" in stem:
+                    name, version = stem.rsplit("_", 1)
+                else:
+                    name = stem
                     version = "0.0.0"
-                
+
                 # Try to parse info.json for more details
                 info = parse_mod_info(mod_file)
-                
+
                 mod = Mod(
                     name=name,
                     title=info.get("title", name) if info else name,
@@ -90,10 +101,11 @@ class ModChecker:
                     release_date=datetime.fromtimestamp(mod_file.stat().st_mtime),
                     file_size=mod_file.stat().st_size,
                     raw_data=info or {},
+                    enabled=is_enabled,
                 )
-                
+
                 local_mods[name] = mod
-            
+
             except Exception as e:
                 self._log_progress(f"  ✗ Error parsing {mod_file.name}: {e}")
         
@@ -154,7 +166,24 @@ class ModChecker:
         
         # Record when we last checked
         self.last_update_check = datetime.now()
-        
+
+        # Final pass: overlay mod-list.json enabled states onto Mod objects.
+        # mod-list.json is the canonical source of truth; ZIP extension is used
+        # as the initial fallback when an entry is absent from mod-list.json.
+        try:
+            from .mod_list import ModListStore
+            mod_list_states = ModListStore(self.mods_folder).load()
+            for mod_name, mod in self.mods.items():
+                if mod_name in mod_list_states:
+                    stored = mod_list_states[mod_name]
+                    # Never resurrect a mod whose archive is still a .zip.bak
+                    if stored and getattr(mod, "file_path", None) and str(mod.file_path).endswith(".zip.bak"):
+                        stored = False
+                    mod.enabled = stored
+                # If not in mod-list.json, keep the value derived from the ZIP extension.
+        except Exception as _ml_exc:
+            self._log_progress(f"  ⚠ Could not overlay mod-list.json: {_ml_exc}")
+
         return self.mods
 
     def check_updates(self, force_refresh: bool = False) -> tuple[Dict[str, Mod], bool]:
@@ -339,9 +368,9 @@ class ModChecker:
                 name for name, mod in self.mods.items() if mod.is_outdated
             ]
         
-        self._log_progress(f"\n═══════════════════════════════════════════════════════")
+        self._log_progress("\n═══════════════════════════════════════════════════════")
         self._log_progress(f"Updating {len(mod_names)} mod(s)...")
-        self._log_progress(f"═══════════════════════════════════════════════════════")
+        self._log_progress("═══════════════════════════════════════════════════════")
         successful = []
         failed = []
         
@@ -355,9 +384,9 @@ class ModChecker:
                 self._log_progress(f"  [{i}/{len(mod_names)}] ✗ Error updating {mod_name}: {e}")
                 failed.append(mod_name)
         
-        self._log_progress(f"═══════════════════════════════════════════════════════")
+        self._log_progress("═══════════════════════════════════════════════════════")
         self._log_progress(f"✓ {len(successful)} successful, ✗ {len(failed)} failed")
-        self._log_progress(f"═══════════════════════════════════════════════════════")
+        self._log_progress("═══════════════════════════════════════════════════════")
         
         return successful, failed
 

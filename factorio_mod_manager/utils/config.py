@@ -1,6 +1,5 @@
 """Configuration management for Factorio Mod Manager."""
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -14,14 +13,14 @@ class Config:
     # Default configuration
     DEFAULTS = {
         "mods_folder": None,  # Will be auto-detected
-        "username": None,
-        "token": None,
         "theme": "dark",
         "auto_backup": True,
         "download_optional": False,
         "auto_refresh": True,
         "max_workers": 4,
     }
+
+    _CREDENTIAL_KEYS = {"username", "token"}
 
     def __init__(self):
         """Initialize configuration."""
@@ -36,10 +35,12 @@ class Config:
             try:
                 with open(self.config_file, "r") as f:
                     loaded = json.load(f)
-                    self.data.update(loaded)
+                    # Filter out credential keys before merging into memory
+                    safe_config = {k: v for k, v in loaded.items() if k not in self._CREDENTIAL_KEYS}
+                    self.data.update(safe_config)
             except Exception as e:
                 print(f"Error loading config: {e}. Using defaults.")
-        
+
         # Auto-detect Factorio mods folder if not set
         if not self.data.get("mods_folder"):
             self.data["mods_folder"] = self._detect_factorio_folder()
@@ -47,8 +48,9 @@ class Config:
     def save(self) -> None:
         """Save configuration to file."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        safe_data = {k: v for k, v in self.data.items() if k not in self._CREDENTIAL_KEYS}
         with open(self.config_file, "w") as f:
-            json.dump(self.data, f, indent=2)
+            json.dump(safe_data, f, indent=2)
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
         """Get configuration value."""

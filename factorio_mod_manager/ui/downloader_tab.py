@@ -1,1335 +1,1370 @@
-"""Downloader tab UI."""
+"""Downloader tab UI — Qt implementation."""
+from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, font
-from typing import Optional, Dict, Any
-from threading import Thread
-import time
-from ..core import ModDownloader
+import html as html_lib
+import logging
+import re
+from pathlib import Path
+from typing import Dict, Optional
+
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..core import ModDownloader, ModListStore
 from ..core.portal import FactorioPortalAPI, PortalAPIError
-from ..utils import config, validate_mod_url, format_file_size, is_online
-from .widgets import PlaceholderEntry, NotificationManager
+from ..core.queue_models import (
+    OperationKind,
+    OperationSource,
+    OperationState,
+    QueueOperation,
+)
+from ..utils import config, is_online
+from .download_coordinator_job import DownloadCoordinatorJob
+from .queue_strip import QueueStrip
+from .widgets import NotificationManager
+from .filter_sort_bar import CategoryChipsBar, VersionFilterBar
 
 
-class DownloaderTab:
-    """UI for mod downloader."""
+# ---------------------------------------------------------------------------
+# Worker: DownloadWorker
+# ---------------------------------------------------------------------------
 
-    # Colors
-    BG_COLOR = "#0e0e0e"
-    DARK_BG = "#1a1a1a"
-    ACCENT_COLOR = "#0078d4"
-    FG_COLOR = "#e0e0e0"
-    SECONDARY_FG = "#b0b0b0"
-    SUCCESS_COLOR = "#4ec952"
-    ERROR_COLOR = "#d13438"
+class DownloadWorker(QThread):
+    """QThread that runs ModDownloader.download_mod() and emits typed signals."""
 
-    def __init__(self, parent: ttk.Notebook, status_manager=None):
-        """
-        Initialize downloader tab.
+    progress = Signal(int, int)     # (completed_count, total_count)
+    mod_status = Signal(str, str)   # (mod_name, status_text)
+    log_message = Signal(str, str)  # (message, level_name)
+    finished = Signal(bool, list)   # (all_succeeded, failed_mod_names)
 
-        Args:
-            parent: Parent notebook widget
-            status_manager: StatusManager for updating main window status bar
-        """
-        self.frame = ttk.Frame(parent, style="Dark.TFrame")
-        self.parent = parent
-        self.status_manager = status_manager  # Reference to status manager
+    def __init__(self, mod_url, mods_folder, include_optional=False, extra_mods=None, parent=None):
+        super().__init__(parent)
+        self._mod_url = mod_url
+        self._mods_folder = mods_folder
+        self._include_optional = include_optional
+        self._extra_mods = extra_mods or []
+
+    def run(self):
+        try:
+            downloader = ModDownloader(self._mods_folder)
+
+            def _on_progress(completed, total):
+                self.progress.emit(completed, total)
+                if total > 0:
+                    pct = int(completed / total * 100)
+                    self.log_message.emit(
+                        f"Downloading: {completed}/{total} mods ({pct}%)", "INFO"
+                    )
+
+            def _on_mod_status(mod_name, status, pct=None):
+                self.mod_status.emit(mod_name, status)
+
+            downloader.set_overall_progress_callback(_on_progress)
+            downloader.set_mod_progress_callback(_on_mod_status)
+            downloader.set_progress_callback(lambda msg: self.log_message.emit(msg, "INFO"))
+
+            # Extract mod name from URL or treat input as a bare mod name
+            import re as _re
+            m = _re.search(r'/mod/([^/?&\s]+)', self._mod_url)
+            mod_name = m.group(1) if m else self._mod_url.strip()
+
+            mod_list = [mod_name] + [m for m in self._extra_mods if m != mod_name]
+            _downloaded, failed = downloader.download_mods(
+                mod_list, include_optional=self._include_optional
+            )
+            self.finished.emit(len(failed) == 0, failed)
+        except PortalAPIError as exc:
+            self.log_message.emit(str(exc), "ERROR")
+            self.finished.emit(False, [])
+        except Exception as exc:
+            self.log_message.emit(f"Unexpected error: {exc}", "ERROR")
+            self.finished.emit(False, [])
+
+
+# ---------------------------------------------------------------------------
+# Worker: ResolveWorker
+# ---------------------------------------------------------------------------
+
+class ResolveWorker(QThread):
+    """QThread that resolves a mod URL to a mod info dict (Load Mod button)."""
+
+    resolved = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, mod_url, parent=None):
+        super().__init__(parent)
+        self._mod_url = mod_url
+
+    def run(self):
+        try:
+            portal = FactorioPortalAPI()
+            # Extract mod name from URL or treat input as a bare mod name
+            m = re.search(r'/mod/([^/?&\s]+)', self._mod_url)
+            mod_name = m.group(1) if m else self._mod_url.strip()
+            info = portal.get_mod(mod_name)
+            self.resolved.emit(info)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Worker: SearchWorker  (500 ms debounce on URL field)
+# ---------------------------------------------------------------------------
+
+class SearchWorker(QThread):
+    """QThread that searches the portal for mods matching a query string."""
+
+    result = Signal(list, int, int, int)   # (results, token, page, total_pages)
+    error = Signal(str)
+
+    def __init__(self, query: str, category: str = "", version: str = "",
+                 page: int = 1, token: int = 0, parent=None):
+        super().__init__(parent)
+        self._query    = query
+        self._category = category
+        self._version  = version
+        self._page     = page
+        self._token    = token
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        try:
+            portal = FactorioPortalAPI()
+            if self.isInterruptionRequested():
+                return
+            results, cur_page, total_pages = portal.search_mods(
+                self._query, limit=20,
+                category=self._category,
+                version=self._version,
+                page=self._page,
+            )
+            if not self.isInterruptionRequested():
+                self.result.emit(results, self._token, cur_page, total_pages)
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Worker: CategoryBrowseWorker
+# ---------------------------------------------------------------------------
+
+class CategoryBrowseWorker(QThread):
+    """QThread that fetches portal mods by category."""
+
+    result = Signal(list, int, int, int)   # (results, token, page, total_pages)
+    error = Signal(str)
+
+    def __init__(self, category: str, version: str = "", page: int = 1,
+                 token: int = 0, parent=None):
+        super().__init__(parent)
+        self._category = category
+        self._version  = version
+        self._page     = page
+        self._token    = token
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        try:
+            portal = FactorioPortalAPI()
+            if self.isInterruptionRequested():
+                return
+            results, cur_page, total_pages = portal.search_mods(
+                "", limit=20,
+                category=self._category,
+                version=self._version,
+                page=self._page,
+            )
+            if not self.isInterruptionRequested():
+                self.result.emit(results, self._token, cur_page, total_pages)
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Version comparison helper
+# ---------------------------------------------------------------------------
+
+def _version_lt(v1: str, v2: str) -> bool:
+    """Return True if version string v1 is strictly older than v2."""
+    from itertools import zip_longest
+    try:
+        p1 = [int(x) for x in v1.split(".")]
+        p2 = [int(x) for x in v2.split(".")]
+        for a, b in zip_longest(p1, p2, fillvalue=0):
+            if a < b:
+                return True
+            if a > b:
+                return False
+        return False
+    except (ValueError, AttributeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# ModBrowseCard — clickable card shown in the browse grid
+# ---------------------------------------------------------------------------
+
+class ModBrowseCard(QFrame):
+    """Single card in the mod-browse grid.
+
+    Emits clicked(mod_name: str) when the user clicks anywhere on the card.
+    """
+
+    clicked = Signal(str)
+
+    def __init__(self, entry: dict, installed_versions: dict | None = None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("modBrowseCard")
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mod_name = entry.get("name", "")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(3)
+
+        # Title + category chip + status badge row
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+
+        title_lbl = QLabel(entry.get("title") or entry.get("name", ""))
+        title_lbl.setObjectName("modCardTitle")
+        title_lbl.setWordWrap(False)
+        title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        title_row.addWidget(title_lbl, stretch=1)
+
+        cat = (entry.get("category") or "").replace("-", " ").title()
+        if cat:
+            cat_lbl = QLabel(cat)
+            cat_lbl.setObjectName("modCardCategory")
+            title_row.addWidget(cat_lbl)
+
+        # Inline status badge — placed after category chip to avoid overlap
+        if installed_versions is not None:
+            inst_ver = installed_versions.get(self._mod_name)
+            if inst_ver is not None:
+                releases = entry.get("releases") or []
+                portal_ver = releases[-1].get("version", "") if releases else ""
+                if portal_ver and _version_lt(inst_ver, portal_ver):
+                    badge_text, badge_name = "Update", "modCardUpdate"
+                else:
+                    badge_text, badge_name = "Installed", "modCardInstalled"
+                badge_lbl = QLabel(badge_text)
+                badge_lbl.setObjectName(badge_name)
+                title_row.addWidget(badge_lbl)
+
+        layout.addLayout(title_row)
+
+        # Meta row: author · N downloads
+        meta_parts = []
+        owner = entry.get("owner", "")
+        if owner:
+            meta_parts.append(f"by {owner}")
+        dl = entry.get("downloads_count", 0)
+        if dl:
+            meta_parts.append(f"{dl:,}\u2193")
+        meta_lbl = QLabel("  \u00b7  ".join(meta_parts))
+        meta_lbl.setObjectName("modCardMeta")
+        layout.addWidget(meta_lbl)
+
+        # Summary (2 lines max)
+        summary = (entry.get("summary") or "")[:160]
+        if summary:
+            summ_lbl = QLabel(summary)
+            summ_lbl.setObjectName("modCardSummary")
+            summ_lbl.setWordWrap(True)
+            summ_lbl.setMaximumHeight(40)
+            layout.addWidget(summ_lbl)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self.clicked.emit(self._mod_name)
+        super().mousePressEvent(event)
+
+
+# ---------------------------------------------------------------------------
+# DownloaderTab — main QWidget
+# ---------------------------------------------------------------------------
+
+_LEVEL_COLORS: Dict[str, str] = {
+    "DEBUG":    "#b0b0b0",
+    "INFO":     "#e0e0e0",
+    "WARNING":  "#ffad00",
+    "ERROR":    "#d13438",
+    "CRITICAL": "#d13438",
+    "SUCCESS":  "#4ec952",
+}
+
+_MOD_STATUS_COLORS: Dict[str, str] = {
+    "Preparing...":   "#b0b0b0",
+    "Downloading...": "#0078d4",
+    "✓ Downloaded":   "#4ec952",
+    "✗ Failed":       "#d13438",
+}
+
+
+class DownloaderTab(QWidget):
+    """Qt UI for mod downloader."""
+
+    def __init__(self, status_manager=None, parent=None):
+        super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
+        self.status_manager = status_manager
         self.notification_manager: Optional[NotificationManager] = None
-        self.downloader: Optional[ModDownloader] = None
-        self.portal = FactorioPortalAPI()
-        self.is_downloading = False
-        self.last_search_time = 0
-        self.search_timer = None
-
-        # Track which widgets have captured mouse scroll
-        self._info_text_captured = False
-        self._progress_text_captured = False
-        self._mods_canvas_captured = False
-
-        # Setup UI
+        self._queue_controller = None    # injected by MainWindow after construction
+        self._log_bridge = None          # injected by MainWindow after construction
+        self._active_jobs: dict = {}     # op_id → DownloadCoordinatorJob
+        self._search_worker  = None      # keeps SearchWorker alive until done
+        self._resolve_worker = None      # keeps ResolveWorker alive until done
+        self._active_worker  = None      # keeps DownloadWorker alive (legacy fallback)
+        self._browse_worker  = None      # keeps CategoryBrowseWorker alive until done
+        self._request_token  = 0         # incremented on every new search/browse request
+        self._current_query    = ""
+        self._current_category = ""
+        self._current_version  = ""
+        self._current_page     = 1
+        self._total_pages      = 1
+        self._initial_load_done = False
+        self._opt_dep_checkboxes: list = []  # per-load optional dep checkboxes
+        self._installed_mod_names: dict = {}  # mod_name → installed version string
+        self._last_results: list = []         # last grid results (for badge refresh)
         self._setup_ui()
+        self._restore_config()
 
-    def _get_notification_manager(self) -> NotificationManager:
-        """Get or create notification manager."""
-        if self.notification_manager is None:
-            root = self.frame.winfo_toplevel()
-            self.notification_manager = NotificationManager(root)
-        return self.notification_manager
+    # ------------------------------------------------------------------
+    # NotificationManager interface (called by MainWindow)
+    # ------------------------------------------------------------------
 
     def set_notification_manager(self, manager: NotificationManager) -> None:
-        """Set the notification manager (called by main window)."""
         self.notification_manager = manager
+
+    def set_queue_controller(self, controller) -> None:
+        """Inject the shared QueueController (called by MainWindow)."""
+        self._queue_controller = controller
+        # Wire the inline strip to the controller
+        if hasattr(self, "_queue_strip"):
+            controller.queue_changed.connect(
+                lambda ops: self._queue_strip.update_from_operations(ops)
+            )
+        controller.queue_changed.connect(self._on_queue_progress)
+
+    def set_log_bridge(self, bridge) -> None:
+        """Inject the LogSignalBridge so job messages appear in the Logs tab (called by MainWindow)."""
+        self._log_bridge = bridge
 
     def _notify(
         self,
         message: str,
-        notification_type: str = "info",
-        duration_ms: int = 4000,
-        actions: Optional[list] = None,
+        notif_type: str = "info",
+        duration_ms: int = -1,
+        actions=None,
+        event_key: str | None = None,
     ) -> None:
-        """
-        Show a notification.
+        if self.notification_manager is not None:
+            self.notification_manager.show(
+                message,
+                notification_type=notif_type,
+                duration_ms=duration_ms,
+                actions=actions,
+                event_key=event_key,
+            )
 
-        Args:
-            message: Notification message
-            notification_type: Type - "success", "error", "warning", or "info"
-            duration_ms: Duration to show (0 = persistent)
-            actions: List of tuples (label, callback) for action buttons
-        """
-        manager = self._get_notification_manager()
-        manager.show(
-            message,
-            notification_type=notification_type,
-            duration_ms=duration_ms,
-            actions=actions,
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _setup_ui(self):
+        from .styles.tokens import SIDE_PANEL_WIDTH
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Page header zone
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 0, 16, 0)
+        page_title = QLabel("Downloader")
+        page_title.setObjectName("pageTitle")
+        header_layout.addWidget(page_title)
+        header_layout.addStretch()
+
+        self._refresh_btn = QPushButton("\u21bb")
+        self._refresh_btn.setObjectName("refreshButton")
+        self._refresh_btn.setFixedSize(28, 28)
+        self._refresh_btn.setToolTip("Refresh results (F5)")
+        self._refresh_btn.clicked.connect(self.refresh)
+        header_layout.addWidget(self._refresh_btn)
+
+        root.addWidget(header)
+
+        # Body splitter: browse panel (left) + detail/download panel (right)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(1)
+        root.addWidget(splitter, stretch=1)
+
+        # ── LEFT COLUMN: browse ────────────────────────────────────────
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(16, 16, 8, 16)
+        left_layout.setSpacing(8)
+
+        # 1. Search / URL input row
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText(
+            "Search by name or paste URL (e.g. https://mods.factorio.com/mod/…)"
+        )
+        self.url_edit.textChanged.connect(self._on_url_changed)
+        self.load_btn = QPushButton("Load Mod")
+        self.load_btn.clicked.connect(self._on_load_mod)
+        url_row.addWidget(self.url_edit, stretch=1)
+        url_row.addWidget(self.load_btn)
+        left_layout.addLayout(url_row)
+
+        # 2. Category chips (always visible below the search bar)
+        self._chips_bar = CategoryChipsBar()
+        self._chips_bar.category_selected.connect(self._on_category_selected)
+        left_layout.addWidget(self._chips_bar)
+
+        # 3. Version filter chips
+        self._version_bar = VersionFilterBar()
+        self._version_bar.version_selected.connect(self._on_version_selected)
+        left_layout.addWidget(self._version_bar)
+
+        # 4. Scrollable grid of mod cards
+        self._grid_scroll = QScrollArea()
+        self._grid_scroll.setWidgetResizable(True)
+        self._grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._grid_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
-    def _setup_ui(self) -> None:
-        """Setup the UI components."""
-        # Create main scrollable area
-        main_scroll = ttk.Scrollbar(self.frame)
-        main_scroll.pack(side="right", fill="y")
+        self._grid_container = QWidget()
+        self._grid_layout = QGridLayout(self._grid_container)
+        self._grid_layout.setSpacing(10)
+        self._grid_layout.setContentsMargins(4, 0, 4, 0)
+        # Two equal-width columns
+        self._grid_layout.setColumnStretch(0, 1)
+        self._grid_layout.setColumnStretch(1, 1)
+        self._grid_scroll.setWidget(self._grid_container)
+        left_layout.addWidget(self._grid_scroll, stretch=1)
 
-        canvas = tk.Canvas(
-            self.frame,
-            bg=self.BG_COLOR,
-            highlightthickness=0,
-            yscrollcommand=main_scroll.set,
+        # 5. Pagination bar
+        pagination_widget = QWidget()
+        pagination_layout = QHBoxLayout(pagination_widget)
+        pagination_layout.setContentsMargins(0, 4, 0, 4)
+        pagination_layout.setSpacing(8)
+
+        self._prev_btn = QPushButton("← Prev")
+        self._prev_btn.setObjectName("paginationBtn")
+        self._prev_btn.setEnabled(False)
+        self._prev_btn.clicked.connect(self._on_prev_page)
+        pagination_layout.addWidget(self._prev_btn)
+
+        pagination_layout.addStretch()
+
+        self._page_lbl = QLabel("Page 1 of 1")
+        self._page_lbl.setObjectName("paginationLabel")
+        self._page_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pagination_layout.addWidget(self._page_lbl)
+
+        pagination_layout.addStretch()
+
+        self._next_btn = QPushButton("Next →")
+        self._next_btn.setObjectName("paginationBtn")
+        self._next_btn.setEnabled(False)
+        self._next_btn.clicked.connect(self._on_next_page)
+        pagination_layout.addWidget(self._next_btn)
+
+        left_layout.addWidget(pagination_widget)
+
+        splitter.addWidget(left_widget)
+        splitter.setStretchFactor(0, 1)
+
+        # ── RIGHT PANEL: detail + download workflow ────────────────────
+        right_frame = QFrame()
+        right_frame.setObjectName("sidePanel")
+        right_frame.setMinimumWidth(SIDE_PANEL_WIDTH)
+        right_layout = QVBoxLayout(right_frame)
+        right_layout.setContentsMargins(8, 12, 8, 8)
+        right_layout.setSpacing(6)
+
+        side_hdr = QLabel("Selected Mod")
+        side_hdr.setObjectName("depsHeader")
+        right_layout.addWidget(side_hdr)
+
+        # ── Scrollable detail area ─────────────────────────────────────
+        self._detail_scroll = QScrollArea()
+        self._detail_scroll.setWidgetResizable(True)
+        self._detail_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        canvas.pack(side="left", fill="both", expand=True)
-        main_scroll.config(command=canvas.yview)
-
-        # Bind mousewheel to main canvas for scrolling
-        def _on_mousewheel(event):
-            try:
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            except:
-                pass
-            return "break"
-
-        def _on_mousewheel_linux(event):
-            try:
-                if event.num == 4:
-                    canvas.yview_scroll(-3, "units")
-                elif event.num == 5:
-                    canvas.yview_scroll(3, "units")
-            except:
-                pass
-            return "break"
-
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        canvas.bind("<Button-4>", _on_mousewheel_linux)
-        canvas.bind("<Button-5>", _on_mousewheel_linux)
-
-        # Create frame inside canvas
-        content_frame = tk.Frame(canvas, bg=self.BG_COLOR)
-        canvas.create_window(
-            (0, 0), window=content_frame, anchor="nw", tags="content_frame"
+        self._detail_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        _detail_container = QWidget()
+        _detail_vbox = QVBoxLayout(_detail_container)
+        _detail_vbox.setContentsMargins(0, 0, 4, 0)
+        _detail_vbox.setSpacing(0)
 
-        self._main_scrollbar = main_scroll
+        # Empty-state placeholder
+        self._no_mod_lbl = QLabel("Search for a mod or paste\na URL to get started.")
+        self._no_mod_lbl.setObjectName("modMeta")
+        self._no_mod_lbl.setWordWrap(True)
+        self._no_mod_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._no_mod_lbl.setContentsMargins(4, 8, 4, 0)
+        _detail_vbox.addWidget(self._no_mod_lbl)
 
-        # Store individual mod progress widgets
-        self.mod_progress_widgets = {}
+        # Mod detail card (hidden until a mod is resolved)
+        self._mod_card = QFrame()
+        self._mod_card.setObjectName("infoCard")
+        self._mod_card.setVisible(False)
+        card_vbox = QVBoxLayout(self._mod_card)
+        card_vbox.setContentsMargins(10, 8, 10, 10)
+        card_vbox.setSpacing(4)
 
-        def on_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            # Make canvas window width match canvas width
-            canvas.itemconfig("content_frame", width=event.width)
-
-        canvas.bind("<Configure>", on_configure)
-
-        # Store canvas and content_frame for later binding
-        self._scroll_canvas = canvas
-        self._scroll_content_frame = content_frame
-
-        # === INPUT SECTION ===
-        input_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
-        input_frame.pack(fill="x", padx=10, pady=10)
-
-        # Header
-        header_font = font.Font(family="Segoe UI", size=11, weight="bold")
-
-        # Header with separator line
-        header_sep_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        header_sep_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
-
-        header = tk.Label(
-            header_sep_frame,
-            text="Download Mod",
-            font=header_font,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
+        title_row = QHBoxLayout()
+        self.info_title_lbl = QLabel("")
+        self.info_title_lbl.setObjectName("modTitle")
+        self.info_title_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.info_title_lbl.setWordWrap(True)
+        self.info_author_lbl = QLabel("")
+        self.info_author_lbl.setObjectName("modAuthor")
+        self.info_author_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.info_author_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        header.pack(anchor="w")
+        title_row.addWidget(self.info_title_lbl, stretch=1)
+        title_row.addWidget(self.info_author_lbl)
+        card_vbox.addLayout(title_row)
 
-        separator = tk.Frame(header_sep_frame, bg=self.ACCENT_COLOR, height=2)
-        separator.pack(anchor="w", fill="x", pady=(5, 0))
+        self.info_meta_lbl = QLabel("")
+        self.info_meta_lbl.setObjectName("modMeta")
+        self.info_meta_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        card_vbox.addWidget(self.info_meta_lbl)
 
-        # Mod URL with icon
-        url_label_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        url_label_frame.pack(anchor="w", padx=15, pady=(5, 0))
-
-        url_label = tk.Label(
-            url_label_frame,
-            text="🔗 Mod URL:",
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            font=("Segoe UI", 10),
+        self.info_summary_lbl = QLabel("")
+        self.info_summary_lbl.setObjectName("modSummary")
+        self.info_summary_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.info_summary_lbl.setWordWrap(True)
+        self.info_summary_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        url_label.pack(anchor="w")
-        # URL input frame with button
-        url_input_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        url_input_frame.pack(fill="x", padx=15, pady=(5, 10))
+        card_vbox.addWidget(self.info_summary_lbl)
 
-        self.url_entry = PlaceholderEntry(
-            url_input_frame,
-            placeholder="https://mods.factorio.com/mod/",
-            placeholder_color="#666666",
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            insertbackground=self.FG_COLOR,
-            borderwidth=1,
-            relief="solid",
-            font=("Segoe UI", 10),
+        self._dep_divider = QFrame()
+        self._dep_divider.setObjectName("depDivider")
+        self._dep_divider.setFrameShape(QFrame.Shape.HLine)
+        card_vbox.addWidget(self._dep_divider)
+
+        self.deps_hdr = QLabel("Dependencies")
+        self.deps_hdr.setObjectName("depsHeader")
+        card_vbox.addWidget(self.deps_hdr)
+
+        # Dynamic deps container — cleared and rebuilt each mod load
+        self._deps_widget = QWidget()
+        self._deps_layout = QVBoxLayout(self._deps_widget)
+        self._deps_layout.setContentsMargins(0, 2, 0, 0)
+        self._deps_layout.setSpacing(2)
+        card_vbox.addWidget(self._deps_widget)
+
+        # Conflict warning section (hidden until a loaded mod has installed conflicts)
+        self._conflict_section = QFrame()
+        self._conflict_section.setObjectName("conflictSection")
+        self._conflict_layout = QVBoxLayout(self._conflict_section)
+        self._conflict_layout.setContentsMargins(8, 6, 8, 6)
+        self._conflict_layout.setSpacing(4)
+        self._conflict_section.setVisible(False)
+        card_vbox.addWidget(self._conflict_section)
+
+        _detail_vbox.addWidget(self._mod_card)
+        _detail_vbox.addStretch(1)
+        self._detail_scroll.setWidget(_detail_container)
+        right_layout.addWidget(self._detail_scroll, stretch=1)
+
+        # ── Fixed bottom: folder + download + queue strip + progress ──
+        folder_row = QHBoxLayout()
+        folder_label = QLabel("Folder:")
+        self.folder_edit = QLineEdit()
+        self.folder_edit.setReadOnly(True)
+        self.folder_edit.setPlaceholderText("Select mods folder…")
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._on_browse)
+        folder_row.addWidget(folder_label)
+        folder_row.addWidget(self.folder_edit, stretch=1)
+        folder_row.addWidget(browse_btn)
+        right_layout.addLayout(folder_row)
+
+        self.download_btn = QPushButton("Download Mods")
+        self.download_btn.setObjectName("accentButton")
+        self.download_btn.setEnabled(False)
+        self.download_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.url_entry.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        self.download_btn.clicked.connect(self._on_download)
+        right_layout.addWidget(self.download_btn)
 
-        self.get_details_btn = tk.Button(
-            url_input_frame,
-            text="Load Mod",
-            command=self._load_dependencies,
-            bg=self.ACCENT_COLOR,
-            fg="#ffffff",
-            activebackground="#1084d7",
-            activeforeground="#ffffff",
-            relief="flat",
-            padx=12,
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.get_details_btn.pack(side="right", padx=0)
+        # Inline queue strip (between Download button and progress console)
+        self._queue_strip = QueueStrip(source_filter=OperationSource.DOWNLOADER)
+        self._queue_strip.open_queue_requested.connect(self._on_open_queue_requested)
+        right_layout.addWidget(self._queue_strip)
 
-        # Bind URL changes to trigger auto-search (light search only)
-        self.url_entry.bind("<KeyRelease>", lambda e: self._schedule_search())
+        # Progress area (hidden until download starts)
+        self._progress_widget = QWidget()
+        self._progress_widget.setVisible(False)
+        prog_layout = QVBoxLayout(self._progress_widget)
+        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setSpacing(4)
 
-        # Mods folder
-        folder_label_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        folder_label_frame.pack(anchor="w", padx=15, pady=(8, 0))
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        prog_layout.addWidget(self.progress_bar)
 
-        folder_label = tk.Label(
-            folder_label_frame,
-            text="Mods Folder:",
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            font=("Segoe UI", 10, "bold"),
-        )
-        folder_label.pack(anchor="w")
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setFont(QFont("Cascadia Code", 9))
+        self.console.setFixedHeight(90)
+        self.console.setPlaceholderText("Download progress will appear here…")
+        prog_layout.addWidget(self.console)
 
-        # Folder display frame with better styling
-        folder_display_frame = tk.Frame(input_frame, bg=self.DARK_BG)
-        folder_display_frame.pack(fill="x", padx=15, pady=(6, 12))
+        right_layout.addWidget(self._progress_widget)
 
-        folder_text_frame = tk.Frame(
-            folder_display_frame, bg="#2a2a2a", relief="sunken", bd=2
-        )
-        folder_text_frame.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        splitter.addWidget(right_frame)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([900, SIDE_PANEL_WIDTH])
 
-        self.folder_var = tk.StringVar(value=config.get("mods_folder", ""))
-        self.folder_display = tk.Label(
-            folder_text_frame,
-            textvariable=self.folder_var,
-            bg="#2a2a2a",
-            fg="#c0c0c0",
-            font=("Courier New", 10),
-            wraplength=400,
-            justify="left",
-            anchor="w",
-        )
-        self.folder_display.pack(fill="both", expand=True, padx=10, pady=8)
+        # Debounce timer (500 ms)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(500)
+        self._search_timer.timeout.connect(self._perform_search)
 
-        browse_btn = tk.Button(
-            folder_display_frame,
-            text="Browse",
-            command=self._browse_folder,
-            bg=self.ACCENT_COLOR,
-            fg="#ffffff",
-            activebackground="#1084d7",
-            activeforeground="#ffffff",
-            relief="flat",
-            padx=15,
-            font=("Segoe UI", 9, "bold"),
-        )
-        browse_btn.pack(side="right", padx=5)
+        # Refresh badges whenever the mods folder path changes
+        self.folder_edit.textChanged.connect(self._on_folder_changed)
 
-        # === MOD INFO SECTION ===
-        info_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
-        info_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    def _restore_config(self):
+        saved = config.get("mods_folder", "")
+        if saved:
+            self.folder_edit.setText(str(saved))
 
-        # Info header with separator
-        info_header_frame = tk.Frame(info_frame, bg=self.DARK_BG)
-        info_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
-
-        info_header = tk.Label(
-            info_header_frame,
-            text="Mod Information",
-            font=header_font,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-        )
-        info_header.pack(anchor="w")
-
-        info_separator = tk.Frame(info_header_frame, bg=self.ACCENT_COLOR, height=2)
-        info_separator.pack(anchor="w", fill="x", pady=(5, 0))
-
-        # Info display area with optional scrollbar
-        info_scroll_frame = tk.Frame(info_frame, bg=self.DARK_BG)
-        info_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(10, 10))
-
-        self.info_scrollbar = tk.Scrollbar(info_scroll_frame)
-
-        self.mod_info_text = tk.Text(
-            info_scroll_frame,
-            height=8,
-            bg=self.BG_COLOR,
-            fg=self.SECONDARY_FG,
-            font=("Segoe UI", 9),
-            relief="flat",
-            state="disabled",
-            wrap="word",
-            cursor="arrow",
-            insertwidth=0,
-        )
-        self.info_scrollbar.config(command=self.mod_info_text.yview)
-        self.mod_info_text.pack(fill="both", expand=True)
-        self.info_scroll_frame = info_scroll_frame
-
-        # Configure text tags for colors
-        self.mod_info_text.tag_configure(
-            "title", font=("Segoe UI", 11, "bold"), foreground=self.ACCENT_COLOR
-        )
-        self.mod_info_text.tag_configure(
-            "label", font=("Segoe UI", 9, "bold"), foreground=self.FG_COLOR
-        )
-        self.mod_info_text.tag_configure("value", foreground=self.SECONDARY_FG)
-        self.mod_info_text.tag_configure("success", foreground=self.SUCCESS_COLOR)
-        self.mod_info_text.tag_configure("error", foreground=self.ERROR_COLOR)
-        self.mod_info_text.tag_configure("warning", foreground="#ffad00")
-
-        # Initial message
-        self.mod_info_text.config(state="normal")
-        self.mod_info_text.insert("end", "Enter a mod URL to see details...", "value")
-        self.mod_info_text.config(state="disabled")
-
-        # === OPTIONS SECTION ===
-        options_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
-        options_frame.pack(fill="x", padx=10, pady=(0, 10))
-
-        # Options header with separator
-        options_header_frame = tk.Frame(options_frame, bg=self.DARK_BG)
-        options_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
-
-        options_header = tk.Label(
-            options_header_frame,
-            text="Options",
-            font=header_font,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-        )
-        options_header.pack(anchor="w")
-
-        options_separator = tk.Frame(
-            options_header_frame, bg=self.ACCENT_COLOR, height=2
-        )
-        options_separator.pack(anchor="w", fill="x", pady=(5, 0))
-
-        self.include_optional_var = tk.BooleanVar(
-            value=config.get("download_optional", False)
+    def refresh(self) -> None:
+        """Re-fetch portal results for the current query/category/version and re-scan installed."""
+        self._fire_browse(
+            self._current_query,
+            self._current_category,
+            self._current_version,
+            self._current_page,
         )
 
-        checkbox = tk.Checkbutton(
-            options_frame,
-            text="Include optional dependencies (⚠️ may increase download size)",
-            variable=self.include_optional_var,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            activebackground=self.DARK_BG,
-            activeforeground=self.ACCENT_COLOR,
-            selectcolor=self.DARK_BG,
-            font=("Segoe UI", 9),
-        )
-        checkbox.pack(anchor="w", padx=15, pady=(5, 10))
+    def _on_folder_changed(self, _path: str) -> None:
+        """Refresh installed-state badges when the mods folder path changes."""
+        if self._last_results:
+            self._populate_grid(self._last_results)
 
-        # === ACTION BUTTONS ===
-        button_frame = tk.Frame(content_frame, bg=self.BG_COLOR)
-        button_frame.pack(fill="x", padx=10, pady=(0, 10))
+    # ------------------------------------------------------------------
+    # Progress console
+    # ------------------------------------------------------------------
 
-        self.download_btn = tk.Button(
-            button_frame,
-            text="Download",
-            command=self._start_download,
-            bg=self.SUCCESS_COLOR,
-            fg="#000000",
-            activebackground="#5cd65f",
-            activeforeground="#000000",
-            relief="flat",
-            padx=20,
-            pady=10,
-            font=("Segoe UI", 11, "bold"),
-            cursor="hand2",
-        )
-        self.download_btn.pack(side="left", padx=5)
+    def _append_console(self, message, level="INFO"):
+        """Append HTML-escaped, color-coded line to the progress console."""
+        color = _LEVEL_COLORS.get(level.upper(), "#e0e0e0")
+        safe = html_lib.escape(message)
+        self.console.append(f'<span style="color:{color};">{safe}</span>')
+        sb = self.console.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
-        # === PROGRESS SECTION ===
-        progress_frame = tk.Frame(content_frame, bg=self.DARK_BG, relief="flat", bd=1)
-        progress_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    # ------------------------------------------------------------------
+    # Category chip handler
+    # ------------------------------------------------------------------
 
-        # Progress header with separator
-        progress_header_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
-        progress_header_frame.pack(anchor="w", padx=15, pady=(10, 8), fill="x")
+    # ------------------------------------------------------------------
+    # Auto-load on first show
+    # ------------------------------------------------------------------
 
-        progress_header = tk.Label(
-            progress_header_frame,
-            text="Download Progress",
-            font=header_font,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-        )
-        progress_header.pack(anchor="w")
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if not self._initial_load_done:
+            self._initial_load_done = True
+            QTimer.singleShot(800, lambda: self._fire_browse("", "", "", 1))
 
-        progress_separator = tk.Frame(
-            progress_header_frame, bg=self.ACCENT_COLOR, height=2
-        )
-        progress_separator.pack(anchor="w", fill="x", pady=(5, 0))
+    # ------------------------------------------------------------------
+    # Core browse dispatcher
+    # ------------------------------------------------------------------
 
-        # Main progress bar
-        progress_info_frame = tk.Frame(progress_frame, bg=self.DARK_BG)
-        progress_info_frame.pack(fill="x", padx=15, pady=(10, 0))
+    def _fire_browse(self, query: str, category: str, version: str, page: int) -> None:
+        """Start a new browse/search worker, cancelling any running one."""
+        for w in (self._search_worker, self._browse_worker):
+            if w is not None and w.isRunning():
+                w.requestInterruption()
+                w.quit()
+                w.wait()
 
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(
-            progress_info_frame,
-            variable=self.progress_var,
-            maximum=100,
-            mode="determinate",
-        )
-        self.progress_bar.pack(side="left", fill="both", expand=True, pady=(5, 0))
+        self._current_query    = query
+        self._current_category = category
+        self._current_version  = version
+        self._current_page     = page
+        self._request_token   += 1
+        token = self._request_token
 
-        # Progress percentage label
-        self.progress_label = tk.Label(
-            progress_info_frame,
-            text="0%",
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            font=("Segoe UI", 9, "bold"),
-            width=5,
-        )
-        self.progress_label.pack(side="right", padx=(10, 0), pady=(5, 0))
+        self._show_grid_status("Loading\u2026")
 
-        # Main content area with console on left and individual downloads on right
-        content_area = tk.Frame(progress_frame, bg=self.DARK_BG)
-        content_area.pack(fill="both", expand=True, padx=15, pady=(5, 10))
+        if hasattr(self, "_refresh_btn"):
+            self._refresh_btn.setEnabled(False)
 
-        # Progress text area with scrollbar (LEFT SIDE)
-        scroll_frame = tk.Frame(content_area, bg=self.DARK_BG)
-        scroll_frame.pack(side="left", fill="both", expand=True)
-        self.progress_scroll_frame = scroll_frame  # Store reference
+        if query:
+            worker = SearchWorker(
+                query, category=category, version=version, page=page,
+                token=token, parent=self,
+            )
+            self._search_worker = worker
+        else:
+            worker = CategoryBrowseWorker(
+                category, version=version, page=page,
+                token=token, parent=self,
+            )
+            self._browse_worker = worker
 
-        scrollbar = tk.Scrollbar(scroll_frame)
-        scrollbar.pack(side="right", fill="y")
+        worker.result.connect(self._on_search_result)
+        worker.error.connect(lambda e: self._show_grid_status(f"Error: {e}"))
+        worker.start()
 
-        self.progress_text = tk.Text(
-            scroll_frame,
-            height=15,
-            width=80,
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-            insertbackground=self.FG_COLOR,
-            yscrollcommand=scrollbar.set,
-            relief="solid",
-            borderwidth=1,
-            font=("Consolas", 9),
-            cursor="arrow",
-            insertwidth=0,
-        )
-        self.progress_text.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=self.progress_text.yview)
+    # ------------------------------------------------------------------
+    # Grid helpers
+    # ------------------------------------------------------------------
 
-        # Configure text tags for colors
-        self.progress_text.tag_config("success", foreground=self.SUCCESS_COLOR)
-        self.progress_text.tag_config("error", foreground=self.ERROR_COLOR)
-        self.progress_text.tag_config("info", foreground=self.ACCENT_COLOR)
-        self.progress_text.tag_config("warning", foreground="#ffad00")
+    def _clear_grid(self) -> None:
+        """Remove all widgets from the browse grid."""
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        # Individual downloads sidebar (RIGHT SIDE)
-        sidebar_frame = tk.Frame(content_area, bg=self.DARK_BG, width=250)
-        sidebar_frame.pack(side="right", fill="both", padx=(10, 0))
-        sidebar_frame.pack_propagate(False)
+    def _show_grid_status(self, msg: str) -> None:
+        """Clear grid and show a centred status label spanning both columns."""
+        self._clear_grid()
+        lbl = QLabel(msg)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setObjectName("modMeta")
+        self._grid_layout.addWidget(lbl, 0, 0, 1, 2)
+        self._grid_layout.setRowStretch(0, 0)
+        self._grid_layout.setRowStretch(1, 1)
 
-        sidebar_header = tk.Label(
-            sidebar_frame,
-            text="📥 Downloads",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.DARK_BG,
-            fg=self.FG_COLOR,
-        )
-        sidebar_header.pack(anchor="w", padx=5, pady=(5, 5))
-
-        # Create a canvas with scrollbar for individual mod downloads
-        sidebar_scroll = tk.Scrollbar(sidebar_frame)
-        sidebar_scroll.pack(side="right", fill="y")
-
-        self.mods_canvas = tk.Canvas(
-            sidebar_frame,
-            bg=self.BG_COLOR,
-            highlightthickness=0,
-            yscrollcommand=sidebar_scroll.set,
-            relief="solid",
-            borderwidth=1,
-        )
-        self.mods_canvas.pack(side="left", fill="both", expand=True)
-        sidebar_scroll.config(command=self.mods_canvas.yview)
-
-        # Frame inside canvas to hold individual mod progress items
-        self.mods_frame = tk.Frame(self.mods_canvas, bg=self.BG_COLOR)
-        self.mods_canvas_window = self.mods_canvas.create_window(
-            (0, 0), window=self.mods_frame, anchor="nw"
-        )
-
-        def on_canvas_configure(event):
-            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
-            # Make frame width match canvas width
-            self.mods_canvas.itemconfig(self.mods_canvas_window, width=event.width)
-
-        self.mods_canvas.bind("<Configure>", on_canvas_configure)
-
-        # Bind frame configure event to update scroll region when items are added
-        def on_frame_configure(event):
-            self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
-
-        self.mods_frame.bind("<Configure>", on_frame_configure)
-
-        # Dictionary to store mod progress widgets
-        self.mod_progress_widgets = {}
-
-        # Initial placeholder message
-        self.progress_text.insert(
-            "end", "Ready to download - enter a mod URL and click Download", "info"
-        )
-
-        # Bind mousewheel to all child widgets to propagate to canvas
-        self._bind_mousewheel_recursive(
-            content_frame, _on_mousewheel, _on_mousewheel_linux
-        )
-
-        # Set up click-capture scrolling - bind to content_frame to detect mouse position
-        # This approach works because disabled widgets don't receive events, so we detect position instead
-        content_frame.bind("<Button-1>", self._on_click)
-        content_frame.bind("<Button-3>", self._on_right_click)
-        content_frame.bind("<Leave>", self._on_leave)
-        content_frame.bind("<MouseWheel>", self._on_global_mousewheel)
-        content_frame.bind(
-            "<Button-4>", lambda e: self._on_global_mousewheel_linux(e, -3)
-        )
-        content_frame.bind(
-            "<Button-5>", lambda e: self._on_global_mousewheel_linux(e, 3)
-        )
-
-    def _bind_mousewheel_recursive(self, widget, handler_win, handler_linux):
-        """Recursively bind mousewheel to all child widgets."""
-        try:
-            # Skip Text widgets and Scrollbars - they handle their own events
-            if isinstance(widget, (tk.Text, tk.Scrollbar, ttk.Scrollbar)):
-                return
-
-            # Skip frames that contain scrollable content (they have scrollbars and Text widgets)
-            if hasattr(self, "info_scroll_frame") and widget is self.info_scroll_frame:
-                return
-            if (
-                hasattr(self, "progress_scroll_frame")
-                and widget is self.progress_scroll_frame
-            ):
-                return
-
-            # Bind to this widget
-            widget.bind("<MouseWheel>", handler_win)
-            widget.bind("<Button-4>", handler_linux)
-            widget.bind("<Button-5>", handler_linux)
-
-            # Recursively bind to all children
-            for child in widget.winfo_children():
-                self._bind_mousewheel_recursive(child, handler_win, handler_linux)
-        except:
-            pass
-
-    def _on_text_mousewheel(self, event, widget_type: str, text_widget: tk.Text) -> str:
-        """Handle mouse wheel scroll for text widgets only when captured."""
-        is_captured = False
-        if widget_type == "info":
-            is_captured = self._info_text_captured
-        elif widget_type == "progress":
-            is_captured = self._progress_text_captured
-
-        if is_captured:
-            text_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"  # Block main canvas from scrolling
-        # If not captured, let event propagate to main canvas
-        return ""
-
-    def _on_text_mousewheel_linux(
-        self, event, widget_type: str, text_widget: tk.Text, scroll_units: int
-    ) -> str:
-        """Handle mouse wheel scroll for text widgets on Linux."""
-        is_captured = False
-        if widget_type == "info":
-            is_captured = self._info_text_captured
-        elif widget_type == "progress":
-            is_captured = self._progress_text_captured
-
-        if is_captured:
-            text_widget.yview_scroll(scroll_units, "units")
-            return "break"  # Block main canvas from scrolling
-        # If not captured, let event propagate to main canvas
-        return ""
-
-    def _on_canvas_mousewheel(
-        self, event, widget_type: str, canvas_widget: tk.Canvas
-    ) -> str:
-        """Handle mouse wheel scroll for canvas widgets only when captured."""
-        is_captured = False
-        if widget_type == "mods":
-            is_captured = self._mods_canvas_captured
-
-        if is_captured:
-            canvas_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"  # Block main canvas from scrolling
-        # If not captured, let event propagate to main canvas
-        return ""
-
-    def _on_canvas_mousewheel_linux(
-        self, event, widget_type: str, canvas_widget: tk.Canvas, scroll_units: int
-    ) -> str:
-        """Handle mouse wheel scroll for canvas widgets on Linux."""
-        is_captured = False
-        if widget_type == "mods":
-            is_captured = self._mods_canvas_captured
-
-        if is_captured:
-            canvas_widget.yview_scroll(scroll_units, "units")
-            return "break"  # Block main canvas from scrolling
-        # If not captured, let event propagate to main canvas
-        return ""
-
-    def _browse_folder(self) -> None:
-        """Browse for mods folder."""
-        folder = filedialog.askdirectory(
-            title="Select Factorio Mods Folder",
-            initialdir=self.folder_var.get() or config.get("mods_folder", ""),
-        )
+    def _populate_grid(self, results: list) -> None:
+        """Fill the browse grid with ModBrowseCard widgets."""
+        self._last_results = results
+        folder = self.folder_edit.text().strip()
         if folder:
-            self.folder_var.set(folder)
-            config.set("mods_folder", folder)
-
-    def _log_progress(self, message: str, tag: str = "") -> None:
-        """Log progress message to text widget."""
-        self.progress_text.insert("end", message + "\n", tag)
-        self.progress_text.see("end")
-        self.progress_text.update_idletasks()
-
-    def _update_overall_progress(self, completed: int, total: int) -> None:
-        """Update overall download progress bar."""
-        if total == 0:
-            pct = 0
-        else:
-            pct = (completed / total) * 100
-
-        self.progress_var.set(pct)
-        self.progress_label.config(text=f"{int(pct)}%")
-        self.progress_bar.update_idletasks()
-
-        # Update main status bar
-        if self.status_manager:
-            status_msg = f"Downloading: {completed}/{total} mods ({int(pct)}%)"
-            self.status_manager.push_status(status_msg, "working")
-
-    def _update_mod_download_progress(
-        self, mod_name: str, status: str, progress_pct: int
-    ) -> None:
-        """Update progress for a specific mod download."""
-        # Ensure mod item exists
-        if mod_name not in self.mod_progress_widgets:
-            self._add_mod_progress_item(mod_name)
-
-        # Update status
-        self._update_mod_status(mod_name, status)
-
-        # Mark as complete if status indicates completion
-        if "✓" in status or "✗" in status:
-            success = "✓" in status
-            self._complete_mod_progress(mod_name, success)
-
-    def _add_mod_progress_item(self, mod_name: str) -> None:
-        """Add a new mod to the individual downloads sidebar."""
-        if mod_name in self.mod_progress_widgets:
+            self._installed_mod_names = self._scan_installed_mod_names(folder)
+        self._clear_grid()
+        if not results:
+            self._show_grid_status("No mods found.")
             return
-
-        # Create frame for this mod
-        mod_item = tk.Frame(
-            self.mods_frame, bg=self.BG_COLOR, relief="solid", borderwidth=1
-        )
-        mod_item.pack(fill="x", pady=3, padx=3)
-
-        # Mod name label
-        name_label = tk.Label(
-            mod_item,
-            text=mod_name,
-            bg=self.BG_COLOR,
-            fg=self.FG_COLOR,
-            font=("Segoe UI", 9, "bold"),
-            wraplength=200,
-            justify="left",
-        )
-        name_label.pack(anchor="w", padx=5, pady=(5, 2))
-
-        # Status/progress label
-        status_label = tk.Label(
-            mod_item,
-            text="Preparing...",
-            bg=self.BG_COLOR,
-            fg=self.SECONDARY_FG,
-            font=("Segoe UI", 8),
-        )
-        status_label.pack(anchor="w", padx=5, pady=(0, 3))
-
-        # Store widgets
-        self.mod_progress_widgets[mod_name] = {
-            "frame": mod_item,
-            "name_label": name_label,
-            "status_label": status_label,
-        }
-
-        # Update canvas scroll region
-        self.mods_frame.update_idletasks()
-        self.mods_canvas.configure(scrollregion=self.mods_canvas.bbox("all"))
-
-    def _update_mod_status(self, mod_name: str, status: str) -> None:
-        """Update status for a specific mod."""
-        if mod_name not in self.mod_progress_widgets:
-            self._add_mod_progress_item(mod_name)
-
-        widget = self.mod_progress_widgets[mod_name]
-        widget["status_label"].config(text=status)
-        widget["status_label"].update_idletasks()
-
-    def _complete_mod_progress(self, mod_name: str, success: bool = True) -> None:
-        """Mark a mod as completed."""
-        if mod_name in self.mod_progress_widgets:
-            widget = self.mod_progress_widgets[mod_name]
-            if success:
-                widget["status_label"].config(
-                    text="✓ Downloaded", fg=self.SUCCESS_COLOR
-                )
-                widget["name_label"].config(fg=self.SUCCESS_COLOR)
-            else:
-                widget["status_label"].config(text="✗ Failed", fg=self.ERROR_COLOR)
-                widget["name_label"].config(fg=self.ERROR_COLOR)
-            widget["status_label"].update_idletasks()
-
-    def _start_download(self) -> None:
-        """Start downloading mods in background thread."""
-        url = self.url_entry.get().strip()
-        mods_folder = self.folder_var.get()
-
-        # Validate input
-        if not url or url == "https://mods.factorio.com/mod/":
-            self._notify(
-                "Please enter a mod URL or mod name", notification_type="error"
+        for i, entry in enumerate(results):
+            row, col = divmod(i, 2)
+            card = ModBrowseCard(
+                entry,
+                installed_versions=self._installed_mod_names if self._installed_mod_names else None,
+                parent=self._grid_container,
             )
-            return
+            card.clicked.connect(self._on_card_clicked)
+            self._grid_layout.addWidget(card, row, col)
+        # Trailing stretch so cards don't expand vertically
+        last_row = (len(results) - 1) // 2 + 1
+        self._grid_layout.setRowStretch(last_row, 1)
+        self._grid_scroll.verticalScrollBar().setValue(0)
 
-        # If URL doesn't contain full path, treat it as mod name and auto-complete
-        if "/mod/" not in url:
-            # User entered just the mod name, construct full URL
-            mod_name = url.split("?")[0].strip()  # Remove query parameters
+    def _update_pagination_ui(self) -> None:
+        self._page_lbl.setText(f"Page {self._current_page} of {self._total_pages}")
+        self._prev_btn.setEnabled(self._current_page > 1)
+        self._next_btn.setEnabled(self._current_page < self._total_pages)
+
+    # ------------------------------------------------------------------
+    # Category chip handler
+    # ------------------------------------------------------------------
+
+    def _on_category_selected(self, category: str) -> None:
+        """Fire a portal browse query for the selected category chip."""
+        # Clear URL bar silently when browsing by category
+        self.url_edit.blockSignals(True)
+        self.url_edit.clear()
+        self.url_edit.blockSignals(False)
+        self._reset_mod_detail()
+        self._fire_browse("", category, self._current_version, 1)
+
+    def _on_version_selected(self, version: str) -> None:
+        """Re-fire current browse/search with the new version filter."""
+        query = self.url_edit.text().strip()
+        if query and not query.startswith("http") and "mods.factorio.com" not in query:
+            self._fire_browse(query, "", version, 1)
         else:
-            # Validate full URL format
-            if not validate_mod_url(url):
-                self._notify(
-                    "Invalid URL. Please use: https://mods.factorio.com/mod/ModName",
-                    notification_type="error",
-                )
+            self._fire_browse("", self._current_category, version, 1)
+
+    # ------------------------------------------------------------------
+    # URL / search handlers
+    # ------------------------------------------------------------------
+
+    def _on_url_changed(self, text):
+        self._search_timer.stop()
+        stripped = text.strip()
+        if not stripped:
+            # Revert to category browse
+            self._fire_browse("", self._current_category, self._current_version, 1)
+            self._reset_mod_detail()
+            return
+        # Skip live search when the field already contains a full URL
+        if stripped.startswith("http") or "mods.factorio.com" in stripped:
+            return
+        # Reset category chips to "All" when the user is typing a search term
+        self._chips_bar.select_chip("All")
+        self._search_timer.start()
+
+    def _perform_search(self):
+        """Run after 500 ms debounce: fetch mod info in background."""
+        query = self.url_edit.text().strip()
+        if not query:
+            return
+        self._notify("Searching mods...", event_key="search_running")
+        self._fire_browse(query, "", self._current_version, 1)
+
+    @Slot(list, int, int, int)
+    def _on_search_result(self, results: list, token: int, page: int, total_pages: int):
+        if token != self._request_token:
+            return
+        self._current_page  = page
+        self._total_pages   = total_pages
+        self._search_worker = None
+        self._browse_worker = None
+        if hasattr(self, "_refresh_btn"):
+            self._refresh_btn.setEnabled(True)
+        self._update_pagination_ui()
+        self._populate_grid(results)
+
+    def _on_card_clicked(self, mod_name: str) -> None:
+        """Handle card click: populate right panel with mod detail."""
+        self.url_edit.blockSignals(True)
+        self.url_edit.setText(f"https://mods.factorio.com/mod/{mod_name}")
+        self.url_edit.blockSignals(False)
+        self._on_load_mod()
+
+    # ------------------------------------------------------------------
+    # Pagination
+    # ------------------------------------------------------------------
+
+    def _on_prev_page(self) -> None:
+        if self._current_page > 1:
+            self._fire_browse(
+                self._current_query, self._current_category,
+                self._current_version, self._current_page - 1,
+            )
+
+    def _on_next_page(self) -> None:
+        if self._current_page < self._total_pages:
+            self._fire_browse(
+                self._current_query, self._current_category,
+                self._current_version, self._current_page + 1,
+            )
+
+    def _on_load_mod(self):
+        url = self.url_edit.text().strip()
+        if not url:
+            self._notify("Please enter a mod URL or name.", "error")
+            return
+        self._notify("Resolving mod details...", event_key="mod_resolve")
+        self.load_btn.setEnabled(False)
+        worker = ResolveWorker(url, parent=self)
+        self._resolve_worker = worker
+        worker.resolved.connect(self._advance_to_stage_2)
+        worker.error.connect(self._on_resolve_error)
+        worker.finished.connect(lambda: self.load_btn.setEnabled(True))
+        worker.start()
+
+    @Slot(object)
+    def _populate_mod_info(self, info):
+        title   = info.get("title") or info.get("name", "")
+        author  = info.get("owner", "")
+        summary = info.get("summary", "")
+        downloads = info.get("downloads_count", 0)
+
+        releases = info.get("releases", [])
+        version         = ""
+        factorio_version = ""
+        if releases:
+            latest = releases[-1]
+            version          = latest.get("version", "")
+            factorio_version = latest.get("factorio_version", "")
+
+        self.info_title_lbl.setText(title)
+        self.info_author_lbl.setText(f"by {author}" if author else "")
+
+        meta_parts = []
+        if version:
+            meta_parts.append(f"v{version}")
+        if downloads:
+            meta_parts.append(f"{downloads:,} downloads")
+        if factorio_version:
+            meta_parts.append(f"Factorio {factorio_version}")
+        self.info_meta_lbl.setText("  \u00b7  ".join(meta_parts))
+
+        self.info_summary_lbl.setText(summary[:240] if summary else "")
+        self.info_summary_lbl.setVisible(bool(summary))
+
+        # Parse and display dependencies
+        req, opt, base, incompat = self._parse_deps(info)
+
+        # Rebuild dep rows from scratch
+        while self._deps_layout.count():
+            item = self._deps_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._opt_dep_checkboxes = []
+
+        def _dep_section(section_title, names, prefix="\u2192", obj_name="depRow"):
+            if not names:
                 return
-            # Extract mod name from URL (remove query parameters)
-            mod_name = url.split("/mod/")[-1].strip("/")
-            mod_name = mod_name.split("?")[
-                0
-            ]  # Remove query parameters like ?from=search
+            hdr = QLabel(section_title)
+            hdr.setObjectName("depSectionHdr")
+            self._deps_layout.addWidget(hdr)
+            for name in names:
+                lbl = QLabel(f"  {prefix}  {name}")
+                lbl.setObjectName(obj_name)
+                lbl.setTextFormat(Qt.TextFormat.PlainText)
+                lbl.setWordWrap(True)
+                self._deps_layout.addWidget(lbl)
 
-        if not mods_folder:
-            self._notify("Please select a mods folder", notification_type="error")
+        _dep_section("Required", req, "\u2192", "depRow")
+
+        if opt:
+            hdr = QLabel("Optional  \u2014  check to include")
+            hdr.setObjectName("depSectionHdr")
+            self._deps_layout.addWidget(hdr)
+            for name in opt:
+                cb = QCheckBox(name)
+                cb.setObjectName("depOptCheckbox")
+                self._deps_layout.addWidget(cb)
+                self._opt_dep_checkboxes.append(cb)
+
+        _dep_section("Base / Expansion", base, "\u25c6", "depRow")
+        _dep_section("Incompatible", incompat, "\u2715", "depRowIncompat")
+
+        any_deps = bool(req or opt or base or incompat)
+        self.deps_hdr.setVisible(any_deps)
+        self._dep_divider.setVisible(any_deps)
+        self._deps_widget.setVisible(any_deps)
+
+        # Build conflict panel for incompatible mods that are already installed
+        self._refresh_conflict_section(incompat)
+
+        self._mod_card.setVisible(True)
+        self._no_mod_lbl.setVisible(False)
+        self._resolve_worker = None
+
+    def _refresh_conflict_section(self, incompat_names: list) -> None:
+        """Rebuild the inline conflict warning panel based on installed mods."""
+        # Clear existing rows
+        while self._conflict_layout.count():
+            item = self._conflict_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Only show conflicts for mods that are physically installed
+        conflicts = [
+            name for name in incompat_names
+            if name in self._installed_mod_names
+        ]
+        if not conflicts:
+            self._conflict_section.setVisible(False)
             return
 
-        # Disable button and start download
-        self.download_btn.config(state="disabled")
-        self.is_downloading = True
+        warn_hdr = QLabel("\u26a0\ufe0f  Installed Conflicts")
+        warn_hdr.setObjectName("conflictHeader")
+        self._conflict_layout.addWidget(warn_hdr)
 
-        # Clear progress
-        self.progress_text.delete("1.0", "end")
-        self.progress_var.set(0)
-        self.progress_label.config(text="0%")
-        self.mod_progress_widgets.clear()
-        # Clear mods frame
-        for widget in self.mods_frame.winfo_children():
-            widget.destroy()
-        self._log_progress(f"Starting download for {mod_name}...\n", "info")
+        for mod_name in conflicts:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            lbl = QLabel(mod_name)
+            lbl.setObjectName("conflictModName")
+            row.addWidget(lbl, stretch=1)
 
-        # Check network connectivity
-        is_online_status, _ = is_online()
-        if not is_online_status:
-            self._log_progress("Network error: You are offline\n", "error")
-            self.frame.after(
-                500,
-                lambda: self._notify(
-                    "📡 You are offline. Cannot download mods without internet connection.",
-                    notification_type="error",
-                ),
+            disable_btn = QPushButton("Disable")
+            disable_btn.setObjectName("conflictDisableBtn")
+            disable_btn.setFlat(True)
+            # Capture name in default arg to avoid late-binding
+            disable_btn.clicked.connect(
+                lambda _checked=False, n=mod_name: self._on_conflict_disable(n)
             )
-            return
+            row.addWidget(disable_btn)
 
-        # Start download in background thread
-        thread = Thread(
-            target=self._download_thread, args=(mod_name, mods_folder), daemon=True
+            remove_btn = QPushButton("Remove")
+            remove_btn.setObjectName("destructiveButton")
+            remove_btn.setFlat(True)
+            remove_btn.clicked.connect(
+                lambda _checked=False, n=mod_name: self._on_conflict_remove(n)
+            )
+            row.addWidget(remove_btn)
+
+            container = QWidget()
+            container.setLayout(row)
+            self._conflict_layout.addWidget(container)
+
+        self._conflict_section.setVisible(True)
+
+    def _on_conflict_disable(self, mod_name: str) -> None:
+        """Disable a conflicting mod via mod-list.json (does not remove the file)."""
+        folder = self.folder_edit.text().strip()
+        if not folder:
+            self._notify("No mods folder selected.", "error")
+            return
+        store = ModListStore(Path(folder))
+        states = store.load()
+        states[mod_name] = False
+        store.save(states)
+        self._notify(f"{mod_name} disabled.", "info")
+        # Re-scan and rebuild panel — mod file still exists but is marked disabled
+        # It stays in installed names, so keep the row but reflect the change
+        self._refresh_conflict_section(
+            [n for n in self._installed_mod_names
+             if n in {w.text() for w in self._conflict_section.findChildren(QLabel, "conflictModName")}]
         )
-        thread.start()
 
-    def _download_thread(self, mod_name: str, mods_folder: str) -> None:
-        """Background thread for downloading mods."""
-        try:
-            # Get credentials from config
-            username = config.get("username")
-            token = config.get("token")
-
-            # Create downloader
-            self.downloader = ModDownloader(mods_folder, username, token)
-            self.downloader.set_progress_callback(
-                lambda msg: self._log_progress(msg, "info")
-            )
-            self.downloader.set_overall_progress_callback(self._update_overall_progress)
-            self.downloader.set_mod_progress_callback(
-                self._update_mod_download_progress
-            )
-
-            # Update main status bar
-            if self.status_manager:
-                self.status_manager.push_status("Resolving dependencies...", "working")
-
-            self._log_progress("Resolving dependencies...", "info")
-
-            # Download mod
-            include_optional = self.include_optional_var.get()
-
-            if self.status_manager:
-                self.status_manager.push_status("Starting download...", "working")
-
-            downloaded, failed = self.downloader.download_mods(
-                [mod_name], include_optional=include_optional
-            )
-
-            # Show results
-            if downloaded:
-                msg = f"✓ Successfully downloaded {len(downloaded)} mod(s)"
-                self._log_progress(f"\n{msg}\n", "success")
-                if self.status_manager:
-                    self.status_manager.push_status(
-                        f"Downloaded {len(downloaded)} mod(s) successfully", "success"
-                    )
-                self.frame.after(
-                    500,
-                    lambda: self._notify(
-                        msg, notification_type="success", duration_ms=5000
-                    ),
-                )
-
-            if failed:
-                msg = f"✗ Failed to download: {', '.join(failed)}"
-                self._log_progress(f"\n{msg}\n", "error")
-                if self.status_manager:
-                    self.status_manager.push_status(
-                        f"Failed to download {len(failed)} mod(s)", "error"
-                    )
-                self.frame.after(
-                    500,
-                    lambda: self._notify(
-                        msg, notification_type="error", duration_ms=6000
-                    ),
-                )
-
-        except PortalAPIError as e:
-            error_msg = str(e.message)
-            self._log_progress(f"\n✗ {error_msg}\n", "error")
-            if self.status_manager:
-                self.status_manager.push_status(f"Download error: {error_msg}", "error")
-            self.frame.after(
-                500,
-                lambda: self._notify(
-                    error_msg, notification_type="error", duration_ms=6000
-                ),
-            )
-        except Exception as e:
-            error_msg = str(e)
-            self._log_progress(f"\n✗ Error: {error_msg}\n", "error")
-            if self.status_manager:
-                self.status_manager.push_status(f"Download error: {error_msg}", "error")
-            self.frame.after(
-                500,
-                lambda: self._notify(
-                    f"Download failed: {error_msg}",
-                    notification_type="error",
-                    duration_ms=6000,
-                ),
-            )
-
-        finally:
-            self.is_downloading = False
-            self.download_btn.config(state="normal")
-
-    def _schedule_search(self) -> None:
-        """Schedule a search with debouncing to avoid too many requests."""
-        # Cancel previous timer if exists
-        if self.search_timer:
-            self.parent.after_cancel(self.search_timer)
-
-        # Schedule new search after 0.5 seconds of inactivity
-        self.search_timer = self.parent.after(500, self._search_mod)
-
-    def _search_mod(self) -> None:
-        """Search for mod info based on URL entry."""
-        url = self.url_entry.get().strip()
-
-        # Extract mod name from URL
-        if not url or url == "https://mods.factorio.com/mod/":
-            self._display_mod_info(None, "Enter a mod URL to see details...")
+    def _on_conflict_remove(self, mod_name: str) -> None:
+        """Physically remove a conflicting mod's zip file from the mods folder."""
+        folder = self.folder_edit.text().strip()
+        if not folder:
+            self._notify("No mods folder selected.", "error")
             return
-
-        # Try to extract mod name - preserve case as API is case-sensitive
-        if "/mod/" in url:
-            mod_name = url.split("/mod/")[-1].strip("/")
-            mod_name = mod_name.split("?")[
-                0
-            ]  # Remove query parameters like ?from=search
-        else:
-            mod_name = url.split("?")[0]  # Remove query parameters from direct name
-
-        if not mod_name:
-            self._display_mod_info(None, "Invalid mod URL format")
-            return
-
-        # Start search in background thread to avoid freezing UI
-        thread = Thread(target=self._search_thread, args=(mod_name,), daemon=True)
-        thread.start()
-
-    def _search_thread(self, mod_name: str) -> None:
-        """Background thread for searching mod info."""
-        try:
-            # Fetch mod info from portal - light operation, just basic mod data
-            mod_data = self.portal.get_mod(mod_name)
-
-            # Note: We DO NOT resolve dependencies during auto-search as it's too slow
-            # and blocks the UI. Dependencies will be resolved on-demand if user downloads.
-            # This keeps the auto-search responsive while typing.
-
-            self._display_mod_info(mod_data, mod_name)
-        except Exception as e:
-            self._display_mod_info(None, f"Error searching for mod: {e}")
-
-    def _load_dependencies(self) -> None:
-        """Load and display mod dependencies when user clicks 'Load Dependencies' button."""
-        url = self.url_entry.get().strip()
-
-        # Extract mod name from URL
-        if not url or url == "https://mods.factorio.com/mod/":
-            self._notify(
-                "Please enter a mod URL to see details", notification_type="warning"
-            )
-            return
-
-        # Try to extract mod name
-        if "/mod/" in url:
-            mod_name = url.split("/mod/")[-1].strip("/")
-            mod_name = mod_name.split("?")[0]
-        else:
-            mod_name = url.split("?")[0]
-
-        if not mod_name:
-            self._notify("Invalid mod URL format", notification_type="error")
-            return
-
-        # Show loading status
-        self.mod_info_text.config(state="normal")
-        self.mod_info_text.delete("1.0", "end")
-        self.mod_info_text.insert("end", "Loading dependencies...", "value")
-        self.mod_info_text.config(state="disabled")
-
-        # Start dependency resolution in background thread
-        thread = Thread(
-            target=self._load_dependencies_thread, args=(mod_name,), daemon=True
-        )
-        thread.start()
-
-    def _load_dependencies_thread(self, mod_name: str) -> None:
-        """Background thread for loading and resolving mod dependencies."""
-        try:
-            # Fetch mod info from portal
-            mod_data = self.portal.get_mod(mod_name)
-
-            # Resolve ALL dependencies (including optional) to show what COULD be downloaded
-            if mod_data:
-                from ..core.downloader import ModDownloader
-                from pathlib import Path
-
-                # Get mods folder from UI
-                mods_folder = self.folder_var.get()
-                if mods_folder and Path(mods_folder).exists():
-                    downloader = ModDownloader(mods_folder)
-                else:
-                    downloader = ModDownloader("")  # Empty path, we're not downloading
-
-                try:
-                    # Resolve dependencies WITH optional to show full dependency tree
-                    all_deps, incompats, expansions = downloader.resolve_dependencies(
-                        mod_name,
-                        include_optional=True,  # Include optional so user can see full tree
-                        visited=set(),
-                    )
-                    # Store for display
-                    if "resolved_dependencies" not in mod_data:
-                        mod_data["resolved_dependencies"] = list(all_deps.keys())
-                    if "resolved_incompatibilities" not in mod_data:
-                        mod_data["resolved_incompatibilities"] = incompats
-                    if "resolved_expansions" not in mod_data:
-                        mod_data["resolved_expansions"] = expansions
-
-                    # Check for conflicts with installed mods
-                    if mods_folder and Path(mods_folder).exists():
-                        installed_mods = downloader.get_installed_mods()
-                        conflicts = [m for m in incompats if m in installed_mods]
-                        if conflicts:
-                            mod_data["installed_conflicts"] = conflicts
-                except:
-                    pass  # If resolution fails, just show direct dependencies
-
-            self._display_mod_info(mod_data, mod_name)
-        except Exception as e:
-            self._display_mod_info(None, f"Error fetching details: {e}")
-
-    def _display_mod_info(
-        self, mod_data: Optional[Dict[str, Any]], mod_name: str
-    ) -> None:
-        """Display mod information in the info text widget."""
-        self.mod_info_text.config(state="normal")
-        self.mod_info_text.delete("1.0", "end")
-
-        if mod_data is None:
-            # Display error/empty message
-            self.mod_info_text.insert("end", mod_name, "value")
-            self.mod_info_text.config(state="disabled")
-            return
-
-        try:
-            # Title
-            title = mod_data.get("title", mod_name)
-            self.mod_info_text.insert("end", f"{title}\n", "title")
-            self.mod_info_text.insert("end", "=" * 50 + "\n\n", "value")
-
-            # Author
-            author = mod_data.get("owner") or mod_data.get("author", "Unknown")
-            self.mod_info_text.insert("end", "Author: ", "label")
-            self.mod_info_text.insert("end", f"{author}\n", "value")
-
-            # Downloads
-            downloads = mod_data.get("downloads_count", 0)
-            self.mod_info_text.insert("end", "Downloads: ", "label")
-            self.mod_info_text.insert("end", f"{downloads:,}\n", "success")
-
-            # Latest Version
-            releases = mod_data.get("releases", [])
-            if releases:
-                latest = releases[-1]  # Latest is last
-                version = latest.get("version", "Unknown")
-                released = latest.get("released_at", "Unknown")
-
-                self.mod_info_text.insert("end", "Latest Version: ", "label")
-                self.mod_info_text.insert(
-                    "end", f"{version} (Released: {released})\n", "value"
-                )
-
-            # Homepage
-            homepage = mod_data.get("homepage", None)
-            if homepage:
-                self.mod_info_text.insert("end", "Homepage: ", "label")
-                self.mod_info_text.insert("end", f"{homepage}\n", "value")
-
-            # GitHub
-            github = mod_data.get("github_path", None)
-            if github:
-                self.mod_info_text.insert("end", "GitHub: ", "label")
-                self.mod_info_text.insert(
-                    "end", f"https://github.com/{github}\n", "value"
-                )
-
-            self.mod_info_text.insert("end", "\n", "value")
-
-            # Description
-            description = mod_data.get("description", "No description available")
-            self.mod_info_text.insert("end", "Description:\n", "label")
-            self.mod_info_text.insert("end", f"{description}\n\n", "value")
-
-            # Dependencies from info_json
-            if releases:
-                latest_release = releases[-1]
-                info_json = latest_release.get("info_json", {})
-                all_deps = info_json.get("dependencies", [])
-
-                if all_deps:
-                    self.mod_info_text.insert("end", "Dependencies:\n", "label")
-
-                    required = []
-                    optional = []
-                    incompatible = []
-                    expansions = []
-
-                    # Known Factorio expansions
-                    EXPANSIONS = {"space-age", "elevated-rails", "aquilo"}
-
-                    for dep in all_deps:
-                        dep = dep.strip()
-
-                        if not dep or dep == "base":
-                            continue
-
-                        # Parse dependency format
-                        if dep.startswith("!"):
-                            # Incompatible
-                            dep_name = dep[1:].strip()
-                            incompatible.append(dep_name)
-                        elif dep.startswith("(?)") or dep.startswith("?"):
-                            # Optional
-                            dep_name = dep.replace("(?)", "").replace("?", "").strip()
-                            # Extract just mod name (before constraints)
-                            dep_name = (
-                                dep_name.split()[0]
-                                if " " in dep_name
-                                else dep_name.split(">")[0]
-                                .split("=")[0]
-                                .split("<")[0]
-                                .split("!")[0]
-                                .strip()
-                            )
-                            if dep_name:
-                                optional.append(dep_name)
-                        else:
-                            # Required
-                            dep_name = (
-                                dep.split()[0]
-                                if " " in dep
-                                else dep.split(">")[0]
-                                .split("=")[0]
-                                .split("<")[0]
-                                .strip()
-                            )
-                            if dep_name and dep_name != "base":
-                                # Check if it's an expansion
-                                if dep_name in EXPANSIONS:
-                                    expansions.append(dep_name)
-                                else:
-                                    required.append(dep_name)
-
-                    if required:
-                        self.mod_info_text.insert("end", "  🔗 Required: ", "label")
-                        self.mod_info_text.insert(
-                            "end", ", ".join(required) + "\n", "value"
-                        )
-
-                    if optional:
-                        self.mod_info_text.insert("end", "  ❓ Optional: ", "label")
-                        self.mod_info_text.insert(
-                            "end", ", ".join(optional) + "\n", "warning"
-                        )
-
-                    if incompatible:
-                        self.mod_info_text.insert("end", "  ❌ Incompatible: ", "label")
-                        self.mod_info_text.insert(
-                            "end", ", ".join(incompatible) + "\n", "error"
-                        )
-
-                    if expansions:
-                        self.mod_info_text.insert("end", "  💿 Requires DLC: ", "label")
-                        self.mod_info_text.insert(
-                            "end", ", ".join(expansions) + "\n", "error"
-                        )
-                else:
-                    self.mod_info_text.insert(
-                        "end", "✓ No direct dependencies\n", "success"
-                    )
-
-            # Show all dependencies (including transitive ones) that will be downloaded
-            resolved_deps = mod_data.get("resolved_dependencies", [])
-            if resolved_deps:
-                self.mod_info_text.insert("end", "\n", "value")
-                self.mod_info_text.insert(
-                    "end", "All Dependencies (including transitive):\n", "label"
-                )
-                # Remove the main mod from the list
-                resolved_mods = [m for m in resolved_deps if m != mod_name]
-                if resolved_mods:
-                    self.mod_info_text.insert(
-                        "end", "  📦 " + ", ".join(sorted(resolved_mods)) + "\n", "info"
-                    )
-                    self.mod_info_text.insert(
-                        "end",
-                        f"  Total: {len(resolved_mods)} additional mod(s) will be downloaded\n",
-                        "success",
-                    )
-                    self.mod_info_text.insert(
-                        "end",
-                        "  (includes optional dependencies and their dependencies)\n",
-                        "warning",
-                    )
-                else:
-                    self.mod_info_text.insert(
-                        "end", "  ✓ Only this mod (no dependencies)\n", "success"
-                    )
-
-            resolved_incompats = mod_data.get("resolved_incompatibilities", [])
-            if resolved_incompats:
-                self.mod_info_text.insert("end", "\n⚠️  Incompatible with:\n", "warning")
-                self.mod_info_text.insert(
-                    "end", "  " + ", ".join(resolved_incompats) + "\n", "error"
-                )
-
-            # Check for conflicts with installed mods
-            installed_conflicts = mod_data.get("installed_conflicts", [])
-            if installed_conflicts:
-                self.mod_info_text.insert(
-                    "end", "\n🚨 CONFLICTS WITH INSTALLED MODS:\n", "error"
-                )
-                for conflict in installed_conflicts:
-                    self.mod_info_text.insert(
-                        "end", f"  ⚠️  {conflict} (already installed)\n", "error"
-                    )
-                self.mod_info_text.insert(
-                    "end", "  Installing this mod may cause issues!\n", "error"
-                )
-
-        except Exception as e:
-            self.mod_info_text.insert("end", f"Error displaying mod info: {e}", "error")
-
-        finally:
-            self.mod_info_text.config(state="disabled")
-
-    def _get_widget_at_position(self, x, y):
-        """Get which scrollable widget the mouse is over."""
-        # Get the actual widget at the event position
-        try:
-            widget = self.mod_info_text.winfo_containing(x, y)
-            if widget is self.mod_info_text or (
-                hasattr(widget, "master")
-                and self._is_descendant_of(widget, self.info_scroll_frame)
-            ):
-                return "info"
-
-            widget = self.progress_text.winfo_containing(x, y)
-            if widget is self.progress_text or (
-                hasattr(widget, "master")
-                and self._is_descendant_of(widget, self.progress_scroll_frame)
-            ):
-                return "progress"
-
-            widget = self.mods_canvas.winfo_containing(x, y)
-            if widget is self.mods_canvas or (
-                hasattr(widget, "master")
-                and self._is_descendant_of(widget, self.mods_canvas)
-            ):
-                return "mods"
-        except:
-            pass
-        return None
-
-    def _is_descendant_of(self, widget, parent):
-        """Check if widget is a descendant of parent."""
-        current = widget
-        while current:
-            if current is parent:
-                return True
+        p = Path(folder)
+        removed = 0
+        for zf in list(p.glob(f"{mod_name}_*.zip")):
             try:
-                current = current.master
-            except:
-                break
-        return False
+                zf.unlink()
+                removed += 1
+            except OSError as exc:
+                self._notify(f"Could not remove {zf.name}: {exc}", "error")
+        if removed:
+            self._notify(f"{mod_name} removed ({removed} file(s)).", "success")
+        # Refresh installed names and rebuild panel
+        self._installed_mod_names = self._scan_installed_mod_names(folder)
+        # Collect remaining conflict mod names from UI labels before rebuild
+        remaining = [
+            n for n in self._installed_mod_names
+            if n in {w.text() for w in self._conflict_section.findChildren(QLabel, "conflictModName")}
+            and n != mod_name
+        ]
+        self._refresh_conflict_section(remaining)
 
-    def _capture_scroll(self, widget_type: str) -> None:
-        """Engage scrolling for a specific widget type."""
-        if widget_type == "info":
-            self._info_text_captured = True
-        elif widget_type == "progress":
-            self._progress_text_captured = True
-        elif widget_type == "mods":
-            self._mods_canvas_captured = True
+    @staticmethod
+    def _scan_installed_mod_names(folder: str) -> dict:
+        """Return dict of {mod_name: installed_version} from *.zip files in folder."""
+        if not folder:
+            return {}
+        p = Path(folder)
+        if not p.is_dir():
+            return {}
+        result: dict = {}
+        for f in p.glob("*.zip"):
+            stem = f.stem
+            if "_" in stem:
+                name, ver = stem.rsplit("_", 1)
+                result[name] = ver
+            else:
+                result[stem] = ""
+        return result
 
-    def _release_scroll(self, widget_type: str) -> None:
-        """Disengage scrolling for a specific widget type."""
-        if widget_type == "info":
-            self._info_text_captured = False
-        elif widget_type == "progress":
-            self._progress_text_captured = False
-        elif widget_type == "mods":
-            self._mods_canvas_captured = False
+    def _advance_to_stage_2(self, mod_info: object) -> None:
+        """Populate mod detail card in right panel and enable download."""
+        # Refresh installed mod list so conflict panel is up to date
+        self._installed_mod_names = self._scan_installed_mod_names(
+            self.folder_edit.text().strip()
+        )
+        # Reset stale progress area whenever there are no active downloads
+        if not self._active_jobs:
+            self._progress_widget.setVisible(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setProperty("completed", "")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+        self._populate_mod_info(mod_info)
+        self._mod_card.setVisible(True)
+        self._no_mod_lbl.setVisible(False)
+        self.download_btn.setEnabled(True)
+        self._restore_config()
 
-    def _on_click(self, event):
-        """Handle left-click to engage scrolling."""
-        widget_type = self._get_widget_at_position(event.x_root, event.y_root)
-        if widget_type:
-            self._capture_scroll(widget_type)
+    def _reset_mod_detail(self) -> None:
+        """Hide mod detail card and disable download controls."""
+        self._mod_card.setVisible(False)
+        self._no_mod_lbl.setVisible(True)
+        self.download_btn.setEnabled(False)
+        self._progress_widget.setVisible(False)
 
-    def _on_right_click(self, event):
-        """Handle right-click to disengage scrolling."""
-        widget_type = self._get_widget_at_position(event.x_root, event.y_root)
-        if widget_type:
-            self._release_scroll(widget_type)
+    @Slot(str)
+    def _on_resolve_error(self, error_msg: str) -> None:
+        self._notify(f"Could not resolve mod: {error_msg}", "error", event_key="resolve_error")
 
-    def _on_leave(self, event):
-        """Release all captured scrolling on mouse leave."""
-        self._release_scroll("info")
-        self._release_scroll("progress")
-        self._release_scroll("mods")
+    # ------------------------------------------------------------------
+    # Browse folder
+    # ------------------------------------------------------------------
 
-    def _on_global_mousewheel(self, event):
-        """Handle global mousewheel - check which widget is captured."""
-        widget_type = self._get_widget_at_position(event.x_root, event.y_root)
+    def _on_browse(self):
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Factorio Mods Folder",
+            self.folder_edit.text() or str(Path.home()),
+        )
+        if path:
+            self.folder_edit.setText(path)
+            config.set("mods_folder", path)
 
-        if widget_type == "info" and self._info_text_captured:
-            self.mod_info_text.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"
-        elif widget_type == "progress" and self._progress_text_captured:
-            self.progress_text.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"
-        elif widget_type == "mods" and self._mods_canvas_captured:
-            self.mods_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"
-        # Allow main canvas to scroll
-        return ""
+    # ------------------------------------------------------------------
+    # Dependency parser (runs on the main thread from raw API dict)
+    # ------------------------------------------------------------------
 
-    def _on_global_mousewheel_linux(self, event, scroll_units):
-        """Handle global mousewheel on Linux."""
-        widget_type = self._get_widget_at_position(event.x_root, event.y_root)
+    @staticmethod
+    def _parse_deps(info):
+        """Return (required, optional, base, incompatible) lists from raw portal dict."""
+        from ..core.mod import FACTORIO_EXPANSIONS
+        releases = info.get("releases", [])
+        if not releases:
+            return [], [], [], []
+        deps_raw = releases[-1].get("info_json", {}).get("dependencies", [])
+        required, optional, base, incompatible = [], [], [], []
+        for dep in deps_raw:
+            dep = dep.strip()
+            if not dep or dep == "base" or dep.startswith("base "):
+                continue
+            if dep.startswith("!"):
+                name = re.split(r"[\s><=!]", dep[1:].strip())[0]
+                if name:
+                    incompatible.append(name)
+            elif dep.startswith("(?)") or dep.startswith("?"):
+                clean = dep.replace("(?)", "").replace("?", "").strip()
+                name  = re.split(r"[\s><=!]", clean)[0]
+                if name in FACTORIO_EXPANSIONS:
+                    base.append(name)
+                elif name:
+                    optional.append(name)
+            else:
+                name = re.split(r"[\s><=!]", dep)[0]
+                if name in FACTORIO_EXPANSIONS:
+                    base.append(name)
+                elif name:
+                    required.append(name)
+        return required, optional, base, incompatible
 
-        if widget_type == "info" and self._info_text_captured:
-            self.mod_info_text.yview_scroll(scroll_units, "units")
-            return "break"
-        elif widget_type == "progress" and self._progress_text_captured:
-            self.progress_text.yview_scroll(scroll_units, "units")
-            return "break"
-        elif widget_type == "mods" and self._mods_canvas_captured:
-            self.mods_canvas.yview_scroll(scroll_units, "units")
-            return "break"
-        # Allow main canvas to scroll
-        return ""
+    # ------------------------------------------------------------------
+    # Download
+    # ------------------------------------------------------------------
+
+    def _on_open_queue_requested(self) -> None:
+        """Forward queue-strip 'Open Queue' clicks to the main window."""
+        main_win = self.window()
+        if hasattr(main_win, "open_queue_drawer"):
+            main_win.open_queue_drawer()
+
+    def _on_download(self):
+        url = self.url_edit.text().strip()
+        folder = self.folder_edit.text().strip()
+
+        if not url:
+            self._notify("Please enter a mod URL or name.", "error")
+            return
+        if not folder:
+            self._notify("Please select a mods folder.", "error")
+            return
+        online, _offline_reason = is_online()
+        if not online:
+            self._notify("You appear to be offline.", "error")
+            return
+
+        selected_optionals = [cb.text() for cb in self._opt_dep_checkboxes if cb.isChecked()]
+
+        # ── Queue-backed path ──────────────────────────────────────────
+        if self._queue_controller is not None:
+            import re as _re
+            m = _re.search(r"/mod/([^/?&\s]+)", url)
+            mod_name = m.group(1) if m else url.strip()
+            max_workers = config.get("max_workers", 4)
+
+            op = QueueOperation(
+                source=OperationSource.DOWNLOADER,
+                kind=OperationKind.DOWNLOAD,
+                label=f"Download {mod_name}\u2026",
+            )
+            job = DownloadCoordinatorJob(
+                op, mod_name, selected_optionals, folder,
+                max_workers=max_workers, parent=self,
+            )
+            job.log_message.connect(self._append_console)
+            if self._log_bridge is not None:
+                job.log_message.connect(self._log_bridge.log_record)
+            job.finished_op.connect(self._on_coordinator_finished)
+            self._active_jobs[op.id] = job
+
+            self._queue_controller.batch_enqueue([op])
+            self._queue_controller.start_next()
+            job.start(self._queue_controller)
+
+            # Show progress console
+            self._progress_widget.setVisible(True)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setProperty("completed", "false")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+            self.console.clear()
+
+            self._notify(f"Resolving {mod_name}\u2026", "info")
+            return
+
+        # ── Legacy fallback (no queue controller wired) ────────────────
+        self.download_btn.setEnabled(False)
+        self._progress_widget.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setProperty("completed", "false")
+        self.progress_bar.style().unpolish(self.progress_bar)
+        self.progress_bar.style().polish(self.progress_bar)
+        self.console.clear()
+
+        worker = DownloadWorker(url, folder, False, extra_mods=selected_optionals, parent=self)
+        self._active_worker = worker
+        worker.progress.connect(self._on_progress)
+        worker.mod_status.connect(self._on_mod_status)
+        worker.log_message.connect(self._append_console)
+        if self._log_bridge is not None:
+            worker.log_message.connect(self._log_bridge.log_record)
+        worker.finished.connect(self._on_download_finished)
+        worker.start()
+
+    @Slot(list)
+    def _on_queue_progress(self, operations: list) -> None:
+        """Mirror queue-controller state into the inline progress widget."""
+        for op in operations:
+            if op.id not in self._active_jobs:
+                continue
+
+            # Update progress bar while running
+            if op.state == OperationState.RUNNING:
+                if op.progress is not None:
+                    self.progress_bar.setValue(op.progress)
+
+            elif op.state == OperationState.COMPLETED:
+                self.progress_bar.setValue(100)
+                self.progress_bar.setProperty("completed", "true")
+                self.progress_bar.style().unpolish(self.progress_bar)
+                self.progress_bar.style().polish(self.progress_bar)
+
+            elif op.state == OperationState.FAILED:
+                short = op.failure.short_description if op.failure else "Download failed"
+                self._notify(f"\u2717 {short}", "error")
+                if self.status_manager:
+                    self.status_manager.push_status("Download failed", "error")
+
+            elif op.state == OperationState.CANCELED:
+                self._notify("Download canceled", "info")
+
+        # Hide progress widget once no active jobs remain
+        if not self._active_jobs:
+            self._progress_widget.setVisible(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setProperty("completed", "")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+
+    @Slot(str)
+    def _on_coordinator_finished(self, op_id: str) -> None:
+        """Called when a DownloadCoordinatorJob completes (any outcome)."""
+        job = self._active_jobs.pop(op_id, None)
+        if job is None:
+            return
+
+        # Determine final state from the queue controller snapshot
+        state = OperationState.COMPLETED
+        if self._queue_controller is not None:
+            for op in self._queue_controller._operations:  # noqa: SLF001
+                if op.id == op_id:
+                    state = op.state
+                    break
+
+        if state == OperationState.COMPLETED:
+            self._notify("\u2713 Download complete", "success")
+            if self.status_manager:
+                self.status_manager.push_status("Download complete", "success")
+            # Refresh badges so newly downloaded mod shows "Installed"
+            if self._last_results:
+                self._populate_grid(self._last_results)
+        elif state == OperationState.FAILED:
+            if self.status_manager:
+                self.status_manager.push_status("Download failed", "error")
+        # CANCELED already notified via _on_queue_progress
+
+        if not self._active_jobs:
+            self._progress_widget.setVisible(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setProperty("completed", "")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+
+    @Slot(int, int)
+    def _on_progress(self, completed, total):
+        if total > 0:
+            pct = int(completed / total * 100)
+            self.progress_bar.setValue(pct)
+            self._notify(
+                f"Downloading: {completed}/{total} mods ({pct}%)",
+                event_key="download_progress",
+            )
+            if self.status_manager:
+                self.status_manager.push_status(
+                    f"Downloading: {completed}/{total} mods ({pct}%)", "info"
+                )
+
+    @Slot(str, str)
+    def _on_mod_status(self, mod_name, status_text):
+        self._append_console(f"{mod_name}: {status_text}", "INFO")
+
+    @Slot(bool, list)
+    def _on_download_finished(self, all_succeeded, failed):
+        # Always re-enable (PREP-03 fix — re-enable on error too)
+        self.download_btn.setEnabled(True)
+        self._active_worker = None
+
+        if all_succeeded:
+            self.progress_bar.setValue(100)
+            self.progress_bar.setProperty("completed", "true")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
+            self._notify("✓ Download complete", "success")
+            if self.status_manager:
+                self.status_manager.push_status("Download complete", "success")
+        else:
+            if failed:
+                self._notify(f"✗ Failed to download: {', '.join(failed)}", "error")
+            else:
+                self._notify("✗ Download failed.", "error")
+            if self.status_manager:
+                self.status_manager.push_status("Download failed", "error")

@@ -162,7 +162,7 @@ For higher download limits and faster downloads, you can add your Factorio crede
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/FactorioManager.git
+git clone https://github.com/Musyoka2020-eng/FactorioManager.git
 cd FactorioManager
 
 # Create virtual environment
