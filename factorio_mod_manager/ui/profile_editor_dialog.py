@@ -72,15 +72,21 @@ def resolve_dep_additions(
     to_unblock: List[str] = []
     to_download: List[str] = []
 
-    visited: Set[str] = {mod_name}
+    # BFS to traverse all transitive dependencies
+    visited: Set[str] = set()
     queue: List[str] = [mod_name]
 
     while queue:
-        current = queue.pop(0)
-        mod = installed_mods.get(current)
-        if mod is None:
+        current_name = queue.pop(0)
+        if current_name in visited or current_name == "base":
             continue
-        raw_deps: List[str] = getattr(mod, "raw_data", {}).get("dependencies", [])
+        visited.add(current_name)
+
+        current_mod = installed_mods.get(current_name)
+        if current_mod is None:
+            continue
+
+        raw_deps: List[str] = getattr(current_mod, "raw_data", {}).get("dependencies", [])
         for raw in raw_deps:
             raw = raw.strip()
             if not raw or raw[0] in ("?", "!", "("):
@@ -88,16 +94,25 @@ def resolve_dep_additions(
             dep_name = raw.split()[0]
             if not dep_name or dep_name == "base" or dep_name in visited:
                 continue
-            visited.add(dep_name)
+
+            # Classify this dependency
             if dep_name not in desired_mods:
                 if dep_name in installed_mods:
-                    to_add.append(dep_name)
+                    if dep_name not in to_add:
+                        to_add.append(dep_name)
+                    # Add to queue to discover its transitive deps
+                    queue.append(dep_name)
                 else:
-                    to_download.append(dep_name)
+                    if dep_name not in to_download:
+                        to_download.append(dep_name)
             elif dep_name in disabled_in_profile:
-                to_unblock.append(dep_name)
-            # Recurse into this dep's own requirements
-            queue.append(dep_name)
+                if dep_name not in to_unblock:
+                    to_unblock.append(dep_name)
+                # Add to queue to discover its transitive deps
+                queue.append(dep_name)
+            else:
+                # Already in desired_mods and enabled — still traverse its deps
+                queue.append(dep_name)
 
     return to_add, to_unblock, to_download
 

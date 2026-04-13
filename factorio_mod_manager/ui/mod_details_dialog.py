@@ -665,11 +665,6 @@ class ModDetailsDialog(QDialog):
 
         self._mod: "Mod | None" = data if isinstance(data, Mod) else None
         self._installed_mods: dict = installed_mods or {}
-        if source == "installed" and not installed_mods:
-            logging.getLogger(__name__).warning(
-                "ModDetailsDialog opened with source='installed' but no installed_mods map "
-                "was supplied — DependenciesWidget will misclassify installed dependencies."
-            )
 
         if isinstance(data, Mod):
             self._name = data.name

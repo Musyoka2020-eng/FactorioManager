@@ -103,7 +103,10 @@ class _ApplyThread(QThread):
 
     def _rename_zip(self, mod_name: str, *, enable: bool) -> None:
         """Rename .zip.bak -> .zip (enable) or .zip -> .zip.bak (disable) if the mod
-        is in the installed_mods map and has a physical file path."""
+        is in the installed_mods map and has a physical file path.
+
+        Raises ``OSError`` if the rename fails, keeping on-disk and logical state in sync.
+        """
         mod = self._installed_mods.get(mod_name)
         if mod is None or not getattr(mod, "file_path", None):
             return
@@ -111,21 +114,19 @@ class _ApplyThread(QThread):
         if enable:
             if file_path.name.endswith(".zip.bak"):
                 new_path = file_path.with_suffix("")  # strip .bak
-                try:
-                    file_path.rename(new_path)
-                    mod.file_path = str(new_path)
-                    mod.enabled = True
-                except OSError:
-                    raise  # propagate; caller's run() will emit apply_failed
+                # Do NOT mutate mod state before successful rename
+                file_path.rename(new_path)
+                # Only update in-memory state after successful rename
+                mod.file_path = str(new_path)
+                mod.enabled = True
         else:
             if file_path.name.endswith(".zip") and not file_path.name.endswith(".zip.bak"):
                 new_path = Path(str(file_path) + ".bak")
-                try:
-                    file_path.rename(new_path)
-                    mod.file_path = str(new_path)
-                    mod.enabled = False
-                except OSError:
-                    raise  # propagate; caller's run() will emit apply_failed
+                # Do NOT mutate mod state before successful rename
+                file_path.rename(new_path)
+                # Only update in-memory state after successful rename
+                mod.file_path = str(new_path)
+                mod.enabled = False
 
 
 # ---------------------------------------------------------------------------

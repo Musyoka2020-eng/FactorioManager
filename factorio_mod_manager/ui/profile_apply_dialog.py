@@ -356,11 +356,11 @@ class ProfileApplyDialog(QDialog):
         try:
             self._profile_store.save(self._profile)
         except Exception as exc:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(
+            # Surface the error and do not accept the dialog
+            QMessageBox.critical(
                 self,
                 "Save Failed",
-                f"Could not save profile changes: {exc}\n\nThe profile apply will not proceed.",
+                f"Could not save profile changes:\n{exc}\n\nApply cancelled.",
             )
             return
         self.accept()

@@ -78,6 +78,7 @@ class _ProfileModEditDialog(QDialog):
         self._mod_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
 
         desired = set(self._profile.desired_mods)
+        # Include union of enabled mods and desired mods so disabled/uninstalled desired mods are preserved
         all_names = sorted(set(self._all_enabled.keys()) | desired)
         for name in all_names:
             if name == "base":
