@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{include = "factorio_mod_manager"}]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.11"
 requests = "^2.32.0"
 beautifulsoup4 = "^4.12.0"
 PySide6 = ">=6.7.4"

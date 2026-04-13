@@ -39,13 +39,21 @@ class PortalSearchWorker(QThread):
 
     def run(self) -> None:
         try:
+            # Check for interruption before starting blocking call
+            if self.isInterruptionRequested():
+                return
             portal = FactorioPortalAPI()
             results, _, _ = portal.search_mods(self._query, limit=8)
+            # Check for interruption immediately after blocking call returns
+            if self.isInterruptionRequested():
+                return
             self.result.emit(results)
         except PortalAPIError as exc:
-            self.error.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001 — worker thread must never raise; emit error to UI
-            self.error.emit(f"Search failed: {exc}")
+            if not self.isInterruptionRequested():
+                self.error.emit(f"Search failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

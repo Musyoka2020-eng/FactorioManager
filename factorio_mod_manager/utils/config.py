@@ -35,10 +35,12 @@ class Config:
             try:
                 with open(self.config_file, "r") as f:
                     loaded = json.load(f)
-                    self.data.update(loaded)
+                    # Filter out credential keys before merging into memory
+                    safe_config = {k: v for k, v in loaded.items() if k not in self._CREDENTIAL_KEYS}
+                    self.data.update(safe_config)
             except Exception as e:
                 print(f"Error loading config: {e}. Using defaults.")
-        
+
         # Auto-detect Factorio mods folder if not set
         if not self.data.get("mods_folder"):
             self.data["mods_folder"] = self._detect_factorio_folder()

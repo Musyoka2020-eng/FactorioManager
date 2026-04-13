@@ -84,17 +84,30 @@ class _ApplyThread(QThread):
             # Persist snapshot BEFORE any mutation
             self._profile_store.save_snapshot(snapshot)
 
-            # 2. Apply local state changes — update mod-list.json AND rename ZIPs
+            # 2. Apply local state changes atomically — collect operations first
+            to_enable: List[str] = []
+            to_disable: List[str] = []
             download_mods: List[str] = []
+
             for item in self._diff.items:
                 if item.action in (DiffAction.ENABLE, DiffAction.ADD):
-                    ml.enable(item.mod_name)
-                    self._rename_zip(item.mod_name, enable=True)
+                    to_enable.append(item.mod_name)
                 elif item.action in (DiffAction.DISABLE, DiffAction.REMOVE):
-                    ml.disable(item.mod_name)
-                    self._rename_zip(item.mod_name, enable=False)
+                    to_disable.append(item.mod_name)
                 elif item.action == DiffAction.DOWNLOAD:
                     download_mods.append(item.mod_name)
+
+            # Perform all filesystem renames first (fail fast before touching mod-list.json)
+            for mod_name in to_enable:
+                self._rename_zip(mod_name, enable=True)
+            for mod_name in to_disable:
+                self._rename_zip(mod_name, enable=False)
+
+            # Only update mod-list.json after all renames succeeded
+            for mod_name in to_enable:
+                ml.enable(mod_name)
+            for mod_name in to_disable:
+                ml.disable(mod_name)
 
             self.apply_done.emit(snapshot.id, download_mods)
 

@@ -577,6 +577,9 @@ class ChangelogWidget(QWidget):
     def ensure_loaded(self) -> None:
         if self._loaded:
             return
+        # Guard against starting a second worker while one is already running
+        if self._worker is not None and self._worker.isRunning():
+            return
         self._loading_lbl.setVisible(True)
         self._scroll_area.setVisible(False)
         self._empty_lbl.setVisible(False)
@@ -589,6 +592,7 @@ class ChangelogWidget(QWidget):
     @Slot(dict)
     def _on_changelog_ready(self, data: dict) -> None:
         self._loaded = True
+        self._worker = None  # Clear worker reference after completion
         self._loading_lbl.setVisible(False)
         if not data:
             self._empty_lbl.setVisible(True)
@@ -637,6 +641,7 @@ class ChangelogWidget(QWidget):
     @Slot(str)
     def _on_load_error(self, _msg: str) -> None:
         self._loaded = False
+        self._worker = None  # Clear worker reference after error
         self._loading_lbl.setVisible(False)
         self._empty_lbl.setText(
             "We could not load changelog details. Check your connection, "
@@ -651,6 +656,7 @@ class ChangelogWidget(QWidget):
             self._worker.stop()
             self._worker.quit()
             self._worker.wait(1000)  # Wait up to 1 second
+            self._worker = None  # Clear worker reference after stopping
 
 
 # ---------------------------------------------------------------------------
