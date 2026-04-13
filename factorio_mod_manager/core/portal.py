@@ -73,7 +73,7 @@ class FactorioPortalAPI:
                     error_type="server_error",
                     status_code=response.status_code
                 )
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             raise PortalAPIError(
                 "Cannot connect to Factorio portal. Check your internet connection.",
                 error_type="offline"
@@ -335,13 +335,20 @@ class FactorioPortalAPI:
                     title = (entry.get("title")   or "").lower()
                     summ  = (entry.get("summary") or "").lower()
                     score = -(entry.get("score") or 0)
-                    if name == q:            return (0, score)
-                    if title == q:           return (1, score)
-                    if name.startswith(q):   return (2, score)
-                    if title.startswith(q):  return (3, score)
-                    if q in name:            return (4, score)
-                    if q in title:           return (5, score)
-                    if q in summ:            return (6, score)
+                    if name == q:
+                        return (0, score)
+                    if title == q:
+                        return (1, score)
+                    if name.startswith(q):
+                        return (2, score)
+                    if title.startswith(q):
+                        return (3, score)
+                    if q in name:
+                        return (4, score)
+                    if q in title:
+                        return (5, score)
+                    if q in summ:
+                        return (6, score)
                     return (99, 0)
 
                 ranked  = [(r, _rank(r)) for r in pool]
@@ -380,44 +387,50 @@ class FactorioPortalAPI:
     def get_mod_changelog(self, mod_name: str) -> Dict[str, Any]:
         """
         Fetch mod changelog from the mod portal HTML page.
-        
+
         Args:
             mod_name: Name of the mod
-            
+
         Returns:
             Dictionary with parsed changelog data {version: changelog_text}
+
+        Raises:
+            PortalAPIError: On network or parsing failures
         """
         try:
             changelog_url = f"{self.BASE_URL}/mod/{mod_name}/changelog"
             response = self.session.get(changelog_url, timeout=10)
-            
+
             if response.status_code != 200:
-                return {}
-            
+                raise PortalAPIError(
+                    f"Failed to fetch changelog for {mod_name}: HTTP {response.status_code}"
+                )
+
             soup = BeautifulSoup(response.text, 'html.parser')
             changelog_data = {}
-            
+
             # Find all pre tags with class 'panel-hole-combined'
             # Each version has its own pre tag
             pre_tags = soup.find_all('pre', class_='panel-hole-combined')
-            
+
             for pre_tag in pre_tags:
                 changelog_text = pre_tag.get_text()
-                
+
                 # Extract version number from first line
                 # Format: "Version: X.Y.Z"
                 first_line = changelog_text.split('\n')[0]
                 version_match = re.match(r'^\s*Version:\s*(\d+\.\d+\.\d+)', first_line)
-                
+
                 if version_match:
                     version = version_match.group(1)
                     # Content is everything in the pre tag
                     content = changelog_text.strip()
                     if content:
                         changelog_data[version] = content
-            
+
             return changelog_data
-        
+
+        except PortalAPIError:
+            raise
         except Exception as e:
-            print(f"Error fetching changelog for {mod_name}: {e}")
-            return {}
+            raise PortalAPIError(f"Error fetching changelog for {mod_name}: {e}") from e

@@ -1,6 +1,4 @@
 """Mod downloader with dependency resolution."""
-import os
-import shutil
 import threading
 import time
 import zipfile
@@ -245,7 +243,7 @@ class ModDownloader:
             response = requests.get(mirror_url, timeout=60, stream=True)
             
             if response.status_code == 404:
-                self._log_progress(f"  ✗ Mod not found on mirror (404)")
+                self._log_progress("  ✗ Mod not found on mirror (404)")
                 return False
             
             if response.status_code != 200:
@@ -296,7 +294,7 @@ class ModDownloader:
             
             # Verify file was downloaded
             if not output_path.exists():
-                self._log_progress(f"  ✗ Downloaded file not found")
+                self._log_progress("  ✗ Downloaded file not found")
                 return False
             
             file_size = output_path.stat().st_size
@@ -310,7 +308,7 @@ class ModDownloader:
                         self._log_progress(f"  ✗ ZIP file corrupted: {result}")
                         output_path.unlink()
                         return False
-                    self._log_progress(f"  ✓ ZIP file is valid")
+                    self._log_progress("  ✓ ZIP file is valid")
             except Exception as z_err:
                 self._log_progress(f"  ✗ Invalid ZIP file: {z_err}")
                 output_path.unlink()
@@ -367,10 +365,10 @@ class ModDownloader:
         
         # Check for incompatibility warnings
         if all_incompatibilities:
-            self._log_progress(f"\n⚠️  Incompatible mods detected (cannot coexist):")
+            self._log_progress("\n⚠️  Incompatible mods detected (cannot coexist):")
             for incompat in sorted(all_incompatibilities):
                 self._log_progress(f"  - {incompat}")
-            self._log_progress(f"  These mods conflict with selected mods.")
+            self._log_progress("  These mods conflict with selected mods.")
         
         # Check conflicts with already installed mods
         installed_mods = self.get_installed_mods()
@@ -381,17 +379,17 @@ class ModDownloader:
                 conflicts_with_installed.append(f"{mod_name} (installed)")
         
         if conflicts_with_installed:
-            self._log_progress(f"\n⚠️  WARNING: Conflicts with installed mods:")
+            self._log_progress("\n⚠️  WARNING: Conflicts with installed mods:")
             for conflict in conflicts_with_installed:
                 self._log_progress(f"  ⚠️  {conflict}")
-            self._log_progress(f"  Installing may cause issues. Proceed with caution!")
+            self._log_progress("  Installing may cause issues. Proceed with caution!")
         
         # Check for expansion requirements
         if all_expansions:
-            self._log_progress(f"\n💿 Required DLC Expansions:")
+            self._log_progress("\n💿 Required DLC Expansions:")
             for expansion in sorted(all_expansions):
                 self._log_progress(f"  - {expansion}")
-            self._log_progress(f"  Note: These must be purchased and installed manually")
+            self._log_progress("  Note: These must be purchased and installed manually")
         
         self._log_progress(f"\n📦 To download: {len(all_mods)} mods")
         for mod_name in all_mods:

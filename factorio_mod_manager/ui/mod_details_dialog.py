@@ -1,11 +1,10 @@
 """Mod details popup dialog — Phase 5 (3-tab: Overview / Dependencies / Changelog)."""
 from __future__ import annotations
 
-import logging
 from typing import Union
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -25,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..core import Mod, ModStatus
 from ..core.dependency_graph import DepType, DepState, DepNode, build_dep_graph
-from ..core.portal import FactorioPortalAPI, PortalAPIError
+from ..core.portal import FactorioPortalAPI
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +531,9 @@ class ChangelogWidget(QWidget):
         te = QTextEdit()
         te.setReadOnly(True)
         te.setPlainText(text)
-        te.setFont(QFont("Cascadia Code", 9))
+        fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        fixed_font.setPointSize(9)
+        te.setFont(fixed_font)
         te.document().setTextWidth(te.viewport().width() or 400)
         te.setFixedHeight(min(int(te.document().size().height()) + 12, 300))
 
@@ -557,7 +558,6 @@ class ChangelogWidget(QWidget):
     def ensure_loaded(self) -> None:
         if self._loaded:
             return
-        self._loaded = True
         self._loading_lbl.setVisible(True)
         self._scroll_area.setVisible(False)
         self._empty_lbl.setVisible(False)
@@ -569,6 +569,7 @@ class ChangelogWidget(QWidget):
 
     @Slot(dict)
     def _on_changelog_ready(self, data: dict) -> None:
+        self._loaded = True
         self._loading_lbl.setVisible(False)
         if not data:
             self._empty_lbl.setVisible(True)
@@ -616,6 +617,7 @@ class ChangelogWidget(QWidget):
 
     @Slot(str)
     def _on_load_error(self, _msg: str) -> None:
+        self._loaded = False
         self._loading_lbl.setVisible(False)
         self._empty_lbl.setText(
             "We could not load changelog details. Check your connection, "

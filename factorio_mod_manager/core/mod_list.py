@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 
 class ModListStore:

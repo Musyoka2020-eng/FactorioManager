@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Dict
 
-logger = logging.getLogger(__name__)
-
 from PySide6.QtCore import QPoint, QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -21,6 +19,8 @@ from PySide6.QtWidgets import (
 
 from ..core import Mod
 from ..core.portal import FactorioPortalAPI, PortalAPIError
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

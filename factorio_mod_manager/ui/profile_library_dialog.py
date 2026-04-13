@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -121,11 +120,11 @@ class ProfileLibraryDialog(QDialog):
     """Modal dialog for managing and applying mod profiles.
 
     Emits ``profile_selected(identifier)`` when the user triggers an
-    Apply action.  The *identifier* is either a saved ``Profile.name``
-    or a ``PresetFamily.value`` string.
+    Apply action.  The *identifier* is either a saved ``profile.id``
+    (unique profile identifier) or a ``PresetFamily.value`` string.
     """
 
-    profile_selected = Signal(str)  # profile name or preset family value
+    profile_selected = Signal(str)  # profile.id (unique identifier) or preset family value
 
     def __init__(
         self,

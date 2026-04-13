@@ -53,7 +53,7 @@ class _UpdateThread(QThread):
                 self.finished.emit(False, [])
                 return
             self.finished.emit(len(failed) == 0, failed)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self.finished.emit(False, list(self._mod_names))
 
 

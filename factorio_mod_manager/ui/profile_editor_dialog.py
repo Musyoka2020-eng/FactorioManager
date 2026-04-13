@@ -531,6 +531,13 @@ class ProfileEditorDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
+                # Stage the dependencies into the profile before emitting download_requested
+                for dep in to_download:
+                    if dep not in self._staged_desired:
+                        self._staged_desired.append(dep)
+                        # Mark as disabled since it's not downloaded yet
+                        self._staged_disabled.add(dep)
+                        changed = True
                 self.download_requested.emit(to_download)
 
         if changed:

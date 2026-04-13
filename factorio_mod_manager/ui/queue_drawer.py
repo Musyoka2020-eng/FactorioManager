@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QEvent, QTimer, Signal
+from PySide6.QtCore import Qt, QEvent, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )

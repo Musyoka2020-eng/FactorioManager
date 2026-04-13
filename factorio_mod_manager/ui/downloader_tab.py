@@ -5,7 +5,7 @@ import html as html_lib
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QFont
@@ -35,9 +35,8 @@ from ..core.queue_models import (
     OperationState,
     QueueOperation,
 )
-from ..utils import config, validate_mod_url, format_file_size, is_online
+from ..utils import config, is_online
 from .download_coordinator_job import DownloadCoordinatorJob
-from .download_queue_job import DownloadQueueJob
 from .queue_strip import QueueStrip
 from .widgets import NotificationManager
 from .filter_sort_bar import CategoryChipsBar, VersionFilterBar
