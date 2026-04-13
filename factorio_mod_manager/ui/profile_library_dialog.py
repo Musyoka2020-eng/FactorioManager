@@ -78,7 +78,8 @@ class _ProfileModEditDialog(QDialog):
         self._mod_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
 
         desired = set(self._profile.desired_mods)
-        all_names = sorted(self._all_enabled.keys()) or sorted(desired)
+        # Include union of enabled mods and desired mods so disabled/uninstalled desired mods are preserved
+        all_names = sorted(set(self._all_enabled.keys()) | desired)
         for name in all_names:
             if name == "base":
                 continue
@@ -377,7 +378,7 @@ class ProfileLibraryDialog(QDialog):
     def _on_apply_saved_profile(self) -> None:
         profile = self._selected_profile()
         if profile:
-            self.profile_selected.emit(profile.name)
+            self.profile_selected.emit(profile.id)
             self.accept()
 
     def _on_rename_profile(self) -> None:
