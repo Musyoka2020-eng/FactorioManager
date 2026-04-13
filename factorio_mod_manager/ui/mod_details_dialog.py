@@ -61,16 +61,25 @@ class DepGraphWorker(QThread):
         self._mod_name = mod_name
         self._installed_mods = installed_mods
         self._full = full
+        self._should_stop = False
+
+    def stop(self) -> None:
+        """Request the worker to stop."""
+        self._should_stop = True
 
     def run(self) -> None:
         try:
+            if self._should_stop:
+                return
             portal = FactorioPortalAPI()
             nodes = build_dep_graph(
                 self._mod_name, self._installed_mods, portal, full=self._full
             )
-            self.graph_ready.emit(nodes)
+            if not self._should_stop:
+                self.graph_ready.emit(nodes)
         except Exception as exc:
-            self.error.emit(str(exc))
+            if not self._should_stop:
+                self.error.emit(str(exc))
 
 
 class ChangelogWorker(QThread):
@@ -82,14 +91,23 @@ class ChangelogWorker(QThread):
     def __init__(self, mod_name: str, parent=None):
         super().__init__(parent)
         self._mod_name = mod_name
+        self._should_stop = False
+
+    def stop(self) -> None:
+        """Request the worker to stop."""
+        self._should_stop = True
 
     def run(self) -> None:
         try:
+            if self._should_stop:
+                return
             portal = FactorioPortalAPI()
             data = portal.get_mod_changelog(self._mod_name)
-            self.changelog_ready.emit(data)
+            if not self._should_stop:
+                self.changelog_ready.emit(data)
         except Exception as exc:
-            self.error.emit(str(exc))
+            if not self._should_stop:
+                self.error.emit(str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +247,9 @@ class DependenciesWidget(QWidget):
     def _stop_worker(self) -> None:
         """Stop the background worker thread if running."""
         if self._worker is not None and self._worker.isRunning():
+            self._worker.stop()
             self._worker.quit()
-            self._worker.wait()
+            self._worker.wait(1000)  # Wait up to 1 second
 
     def _on_mode_simplified(self) -> None:
         self._full_mode = False
@@ -629,8 +648,9 @@ class ChangelogWidget(QWidget):
     def _stop_worker(self) -> None:
         """Stop the background worker thread if running."""
         if self._worker is not None and self._worker.isRunning():
+            self._worker.stop()
             self._worker.quit()
-            self._worker.wait()
+            self._worker.wait(1000)  # Wait up to 1 second
 
 
 # ---------------------------------------------------------------------------
@@ -785,16 +805,14 @@ class ModDetailsDialog(QDialog):
 
         if self._source == "portal":
             cta_label = "View on Portal"
-        else:
-            cta_label = "Check for Updates"
-        cta_btn = QPushButton(cta_label)
-        cta_btn.setObjectName("accentButton")
-        cta_btn.clicked.connect(self._on_cta)
+            cta_btn = QPushButton(cta_label)
+            cta_btn.setObjectName("accentButton")
+            cta_btn.clicked.connect(self._on_cta)
+            footer_layout.addWidget(cta_btn)
 
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.reject)
 
-        footer_layout.addWidget(cta_btn)
         footer_layout.addStretch()
         footer_layout.addWidget(close_btn)
         root.addWidget(footer)

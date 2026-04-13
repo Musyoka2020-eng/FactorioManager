@@ -122,6 +122,9 @@ class QueueController(QObject):
         op = self._by_id(operation_id)
         if op is None:
             return
+        # Guard: only transition from RUNNING or PAUSED
+        if op.state not in (OperationState.RUNNING, OperationState.PAUSED):
+            return
         op.state = OperationState.COMPLETED
         op.progress = 100
         if result:
@@ -135,6 +138,9 @@ class QueueController(QObject):
         """Mark operation as FAILED with recoverable *failure* details."""
         op = self._by_id(operation_id)
         if op is None:
+            return
+        # Guard: only transition from RUNNING or PAUSED
+        if op.state not in (OperationState.RUNNING, OperationState.PAUSED):
             return
         op.state = OperationState.FAILED
         op.failure = failure
@@ -164,6 +170,9 @@ class QueueController(QObject):
         if op and op.state in (
             OperationState.QUEUED, OperationState.RUNNING, OperationState.PAUSED
         ):
+            # Guard: operation is not already terminal
+            if op.state in (OperationState.COMPLETED, OperationState.CANCELED, OperationState.FAILED):
+                return False
             op.state = OperationState.CANCELED
             self._prune_terminal()
             self._notify()

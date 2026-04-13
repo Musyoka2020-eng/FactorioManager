@@ -8,7 +8,6 @@ Covers:
 from __future__ import annotations
 
 import sys
-import threading
 from unittest.mock import MagicMock, patch
 
 import pytest

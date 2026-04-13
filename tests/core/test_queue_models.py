@@ -1,13 +1,10 @@
 """Tests for shared queue operation contracts."""
-import pytest
 from factorio_mod_manager.core.queue_models import (
     OperationSource,
     OperationKind,
     OperationState,
     QueueFailure,
-    QueueActionState,
     QueueOperation,
-    QueueResult,
 )
 
 

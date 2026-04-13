@@ -211,7 +211,9 @@ class ProfileApplyJob(QObject):
                 parent=self,
             )
             controller.enqueue(dl_op)
-            controller.start_next()
+            # Transition this specific operation to RUNNING
+            dl_op.state = OperationState.RUNNING
+            controller.queue_changed.emit(list(controller._operations))
             dl_job.start(controller)
             linked_ids.append(dl_op.id)
 

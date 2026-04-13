@@ -4,9 +4,6 @@ from pathlib import Path
 from factorio_mod_manager.core.profiles import (
     Profile,
     PresetFamily,
-    PresetSeed,
-    ProfileDiff,
-    ProfileDiffItem,
     ProfileSnapshot,
     ProfileStore,
     CURATED_PRESETS,

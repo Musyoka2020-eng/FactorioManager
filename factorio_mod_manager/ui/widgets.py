@@ -105,11 +105,11 @@ class Notification(QFrame):
         icon_label.setFixedWidth(20)
         main_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
-        msg_label = QLabel(message)
-        msg_label.setTextFormat(Qt.TextFormat.PlainText)  # T-02-01: prevent HTML injection from portal data
-        msg_label.setWordWrap(True)
-        msg_label.setStyleSheet("color: #e0e0e0; background: transparent; font-size: 10pt;")
-        main_row.addWidget(msg_label, 1)
+        self.msg_label = QLabel(message)
+        self.msg_label.setTextFormat(Qt.TextFormat.PlainText)  # T-02-01: prevent HTML injection from portal data
+        self.msg_label.setWordWrap(True)
+        self.msg_label.setStyleSheet("color: #e0e0e0; background: transparent; font-size: 10pt;")
+        main_row.addWidget(self.msg_label, 1)
 
         # Close (×) button — always shown
         close_btn = QPushButton("✕")
@@ -202,9 +202,11 @@ class Notification(QFrame):
 
     def update_message(self, new_message: str) -> None:
         """Update the displayed message text without recreating the widget."""
-        # Find the QLabel carrying the message (second child of main_row)
-        # Implemented as a pass-through until callers need it
-        pass
+        if hasattr(self, 'msg_label'):
+            self.msg_label.setText(new_message)
+            self.msg_label.setTextFormat(Qt.TextFormat.PlainText)
+            self.msg_label.adjustSize()
+            self.adjustSize()
 
 
 class NotificationManager:
@@ -239,6 +241,12 @@ class NotificationManager:
         if duration_ms == -1:
             duration_ms = self._SEVERITY_DURATIONS.get(notification_type, 3500)
 
+        # Deduplicate by event_key BEFORE cap check: dismiss existing same-keyed toast (D-11)
+        if event_key is not None and event_key in self._keyed:
+            existing = self._keyed.pop(event_key)
+            if existing in self._active:
+                existing._dismiss_immediate()
+
         # DoS mitigation (T-03-02): evict oldest auto-dismiss toast if at cap
         if len(self._active) >= _MAX_ACTIVE:
             oldest = next(
@@ -246,12 +254,6 @@ class NotificationManager:
                 self._active[0],
             )
             oldest._dismiss_immediate()
-
-        # Deduplicate by event_key: dismiss existing same-keyed toast before showing new one (D-11)
-        if event_key is not None and event_key in self._keyed:
-            existing = self._keyed.pop(event_key)
-            if existing in self._active:
-                existing._dismiss_immediate()
 
         notif = Notification(
             container=self._container,

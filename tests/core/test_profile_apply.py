@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import sys
 import uuid
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,7 +18,6 @@ from factorio_mod_manager.core.profiles import (
     Profile,
     ProfileDiff,
     ProfileDiffItem,
-    ProfileSnapshot,
     ProfileStore,
     build_diff,
 )
@@ -91,7 +89,7 @@ class TestDiffCounts:
         """ProfileApplyJob stores the immutable diff without mutating it."""
         from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob
         from factorio_mod_manager.core.queue_models import (
-            OperationKind, OperationSource, OperationState, QueueOperation,
+            OperationKind, OperationSource, QueueOperation,
         )
 
         profile = _make_profile("p4", ["mod_a"])
@@ -118,7 +116,7 @@ class TestDiffCounts:
 class TestSnapshotPersistence:
     def test_snapshot_saved_before_apply_completes(self, qapp, controller):
         """save_snapshot is called before the apply_done signal is emitted."""
-        from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob, _ApplyThread
+        from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob
         from factorio_mod_manager.core.queue_models import (
             OperationKind, OperationSource, OperationState, QueueOperation,
         )
@@ -155,13 +153,12 @@ class TestSnapshotPersistence:
 
     def test_previous_undo_invalidated_on_new_apply(self, qapp, controller):
         """Starting a new apply invalidates the previous completed apply's undo token."""
-        from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob
         from factorio_mod_manager.core.queue_models import (
-            OperationKind, OperationSource, OperationState, QueueOperation,
+            OperationKind, OperationSource, QueueOperation,
         )
 
         profile = _make_profile("inv-test", ["mod_a"])
-        diff_empty = ProfileDiff(profile_id=profile.id, profile_name=profile.name)
+        ProfileDiff(profile_id=profile.id, profile_name=profile.name)
 
         op1 = QueueOperation(
             source=OperationSource.CHECKER,
@@ -186,7 +183,7 @@ class TestSnapshotPersistence:
 class TestLinkedDownloads:
     def test_download_items_become_linked_operations(self, qapp, controller):
         """DOWNLOAD diff items produce linked QueueOperation IDs on completion."""
-        from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob, _ApplyThread
+        from factorio_mod_manager.ui.profile_apply_job import ProfileApplyJob
         from factorio_mod_manager.core.queue_models import (
             OperationKind, OperationSource, OperationState, QueueOperation,
         )

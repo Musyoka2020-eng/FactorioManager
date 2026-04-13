@@ -327,7 +327,6 @@ class ProfileEditorDialog(QDialog):
     def _build_all_items(self) -> None:
         """Build the full row list from staged desired mods."""
         self._all_items = []
-        desired_set = set(self._staged_desired)
         for mod_name in sorted(self._staged_desired, key=str.lower):
             if mod_name == "base":
                 continue
@@ -378,7 +377,12 @@ class ProfileEditorDialog(QDialog):
                     w.deleteLater()
         self._cat_buttons.clear()
 
-        for cat in self._categories():
+        categories = self._categories()
+        # Reset current category if it no longer exists
+        if self._current_category not in categories:
+            self._current_category = "All"
+
+        for cat in categories:
             btn = QPushButton(cat)
             btn.setCheckable(True)
             btn.setObjectName("catTabButton")

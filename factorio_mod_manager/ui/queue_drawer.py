@@ -225,7 +225,7 @@ class QueueDrawer(QFrame):
         close_btn.setFlat(True)
         close_btn.setFixedSize(28, 28)
         close_btn.setAccessibleName("Close queue drawer")
-        close_btn.clicked.connect(self.hide_drawer)
+        close_btn.clicked.connect(self._on_close_clicked)
         hrow.addWidget(close_btn)
 
         layout.addWidget(header)
@@ -314,6 +314,11 @@ class QueueDrawer(QFrame):
                 )
                 self._list_layout.insertWidget(insert_pos, card)
                 insert_pos += 1
+
+    def _on_close_clicked(self) -> None:
+        """Handle close button click - emit signal then hide."""
+        self.close_requested.emit()
+        self.hide_drawer()
 
     def _on_clear_completed(self) -> None:
         self._controller.clear_completed()
