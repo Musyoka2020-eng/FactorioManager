@@ -48,10 +48,19 @@ class _UpdateThread(QThread):
             self.finished.emit(False, list(self._mod_names))
             return
         try:
-            _, failed = self._logic.update_mods(self._mod_names)
-            if self._cancel_event.is_set():
-                self.finished.emit(False, [])
-                return
+            # Update mods one at a time to allow cancellation between items
+            failed = []
+            for mod_name in self._mod_names:
+                if self._cancel_event.is_set():
+                    # Return remaining mods as not updated
+                    remaining = self._mod_names[self._mod_names.index(mod_name):]
+                    self.finished.emit(False, remaining)
+                    return
+                try:
+                    successful, mod_failed = self._logic.update_mods([mod_name])
+                    failed.extend(mod_failed)
+                except Exception:  # noqa: BLE001
+                    failed.append(mod_name)
             self.finished.emit(len(failed) == 0, failed)
         except Exception:  # noqa: BLE001
             self.finished.emit(False, list(self._mod_names))

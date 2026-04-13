@@ -7,8 +7,7 @@ Covers:
 """
 from __future__ import annotations
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from factorio_mod_manager.core.mod import Mod
 from factorio_mod_manager.core.portal import FactorioPortalAPI, PortalAPIError

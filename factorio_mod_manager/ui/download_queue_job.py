@@ -60,7 +60,7 @@ class _DownloadThread(QThread):
     def run(self) -> None:
         # Honour an early cancel (e.g. cancelled before the thread started)
         if self._cancel_event.is_set():
-            self.finished.emit(False, [])
+            self.finished.emit(False, [], "", "")
             return
 
         try:

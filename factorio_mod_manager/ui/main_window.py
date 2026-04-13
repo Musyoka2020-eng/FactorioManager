@@ -277,22 +277,17 @@ class MainWindow(QMainWindow):
             self.page_host.addWidget(placeholder)
 
         # Logger page
-        if self.log_queue is not None:
-            try:
-                from .logger_tab import LoggerTab
-                self.logger_tab = LoggerTab(
-                    log_queue=self.log_queue,
-                    log_bridge=self.log_bridge,
-                )
-                self.page_host.addWidget(self.logger_tab)  # index 2
-            except ImportError:
-                placeholder = QWidget()
-                QVBoxLayout(placeholder).addWidget(QLabel("Logs (not yet implemented)"))
-                self.page_host.addWidget(placeholder)
-        else:
+        try:
+            from .logger_tab import LoggerTab
+            self.logger_tab = LoggerTab(
+                log_queue=self.log_queue if hasattr(self, 'log_queue') else None,
+                log_bridge=self.log_bridge,
+            )
+            self.page_host.addWidget(self.logger_tab)  # index 2
+        except ImportError:
             # Placeholder so index 2 always exists
             placeholder = QWidget()
-            QVBoxLayout(placeholder).addWidget(QLabel("Logs (no log queue provided)"))
+            QVBoxLayout(placeholder).addWidget(QLabel("Logs (not yet implemented)"))
             self.page_host.addWidget(placeholder)
 
         # Settings page (index 3)
@@ -395,15 +390,24 @@ class MainWindow(QMainWindow):
     @Slot(str, str)
     def _on_search_result_selected(self, mod_name: str, source: str) -> None:
         """Open ModDetailsDialog for a search result from the header bar."""
+        mods = getattr(self, "checker_tab", None)
+        mods_dict = getattr(mods, "_mods", {}) if mods else {}
+
         if source == "installed":
-            mods = getattr(self, "checker_tab", None)
-            mods_dict = getattr(mods, "_mods", {}) if mods else {}
             data = mods_dict.get(mod_name)
             if data is None:
                 return
         else:
-            data = {"name": mod_name}
-        dialog = ModDetailsDialog(data, source, parent=self, installed_mods=mods_dict if source == "installed" else None)
+            # Fetch full portal metadata for non-installed mods
+            from ..core.portal import FactorioPortalAPI
+            try:
+                portal = FactorioPortalAPI()
+                data = portal.get_mod(mod_name)
+            except Exception:
+                # Fall back to minimal data if portal fetch fails
+                data = {"name": mod_name}
+
+        dialog = ModDetailsDialog(data, source, parent=self, installed_mods=mods_dict)
         dialog.exec()
 
     # ------------------------------------------------------------------
@@ -426,4 +430,3 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "notification_manager") and self.notification_manager is not None:
             self.notification_manager.reposition_all()
-

@@ -10,7 +10,6 @@ from factorio_mod_manager.core.queue_models import (
     OperationState,
     QueueFailure,
     QueueOperation,
-    QueueResult,
 )
 
 

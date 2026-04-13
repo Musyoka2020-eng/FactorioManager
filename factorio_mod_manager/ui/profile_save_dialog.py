@@ -256,6 +256,9 @@ class SaveProfileDialog(QDialog):
             item = self._tree.topLevelItem(i)
             if item is None:
                 continue
+            # Skip hidden items (filtered out)
+            if item.isHidden():
+                continue
             total += 1
             if item.checkState(0) == Qt.CheckState.Checked:
                 checked += 1
@@ -291,5 +294,7 @@ class SaveProfileDialog(QDialog):
             self._profile_store.save(profile)
             self.profile_saved.emit(profile.id)
             self.accept()
-        except Exception as exc:
+        except (ValueError, OSError) as exc:
             logger.warning("Could not save profile: %s", exc)
+        except Exception:
+            logger.exception("Unexpected error saving profile")

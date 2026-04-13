@@ -1000,7 +1000,10 @@ class CheckerTab(QWidget):
         self._queue_controller.enqueue(op)
         self._queue_controller.start_next()
         job.start(self._queue_controller)
-        _handler = lambda ops, _id=op.id: self._on_apply_queue_progress(ops, _id)
+
+        def _handler(ops, _id=op.id):
+            return self._on_apply_queue_progress(ops, _id)
+
         self._queue_progress_handlers[op.id] = _handler
         self._queue_controller.queue_changed.connect(_handler)
         self._notify(f"Queued: Apply {profile.name}", "info")
@@ -1161,7 +1164,10 @@ class CheckerTab(QWidget):
             self._queue_controller.enqueue(op)
             self._queue_controller.start_next()
             job.start(self._queue_controller)
-            _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+
+            def _handler(ops, _id=op.id):
+                return self._on_update_queue_progress(ops, _id)
+
             self._queue_progress_handlers[op.id] = _handler
             self._queue_controller.queue_changed.connect(_handler)
             self._notify(f"Queued: {label}", "info")
@@ -1195,7 +1201,10 @@ class CheckerTab(QWidget):
             self._queue_controller.enqueue(op)
             self._queue_controller.start_next()
             job.start(self._queue_controller)
-            _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+
+            def _handler(ops, _id=op.id):
+                return self._on_update_queue_progress(ops, _id)
+
             self._queue_progress_handlers[op.id] = _handler
             self._queue_controller.queue_changed.connect(_handler)
             self._notify(f"Queued: {label}", "info")
@@ -1470,7 +1479,10 @@ class CheckerTab(QWidget):
         self._queue_controller.enqueue(op)
         self._queue_controller.start_next()
         job.start(self._queue_controller)
-        _handler = lambda ops, _id=op.id: self._on_update_queue_progress(ops, _id)
+
+        def _handler(ops, _id=op.id):
+            self._on_update_queue_progress(ops, _id)
+
         self._queue_progress_handlers[op.id] = _handler
         self._queue_controller.queue_changed.connect(_handler)
         self._notify(

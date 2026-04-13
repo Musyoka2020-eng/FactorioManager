@@ -13,7 +13,6 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from factorio_mod_manager.core.checker import ModChecker
 from factorio_mod_manager.ui.checker_logic import CheckerLogic
@@ -170,7 +169,7 @@ class TestEnableMod:
 
     def test_roundtrip_disable_then_enable(self, tmp_path):
         """Disable then re-enable returns file to original .zip name."""
-        original = _make_zip(tmp_path, "mod_z", "3.0.0")
+        _make_zip(tmp_path, "mod_z", "3.0.0")
         checker = ModChecker(str(tmp_path))
         with patch.object(checker.portal, "get_mod", return_value=None):
             checker.scan_mods()
@@ -182,5 +181,4 @@ class TestEnableMod:
         assert (tmp_path / "mod_z_3.0.0.zip").exists()
         assert not (tmp_path / "mod_z_3.0.0.zip.bak").exists()
         assert checker.mods["mod_z"].enabled is True
-
 

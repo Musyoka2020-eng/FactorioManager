@@ -12,7 +12,6 @@ Covers:
 """
 from __future__ import annotations
 
-import pytest
 
 from factorio_mod_manager.core.mod import Mod
 from factorio_mod_manager.core.update_guidance import (  # noqa: F401 — RED

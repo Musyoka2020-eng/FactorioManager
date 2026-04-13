@@ -3,9 +3,6 @@ import sys
 from pathlib import Path
 from queue import Queue
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
 
