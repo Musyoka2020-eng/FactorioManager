@@ -32,7 +32,7 @@ A comprehensive graphical tool for managing Factorio mods with automatic depende
 ### Download & Install
 
 1. **Download the latest release:** [FactorioModManager.exe](https://github.com/Musyoka2020-eng/FactorioManager/releases/latest)
-   - No installation required - just run the executable!
+   - installation required
    - Requires Windows 7+ with .NET Framework
 
 2. **Run the application**
