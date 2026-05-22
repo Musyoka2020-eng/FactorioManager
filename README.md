@@ -27,7 +27,67 @@ A graphical tool for managing Factorio mods. Handles downloading, dependency res
 
 ## Quick Start
 
-**Download & Install**
+### Download & Install
+
+1. **Download the latest release:** [FactorioModManager.exe](https://github.com/Musyoka2020-eng/FactorioManager/releases/latest)
+
+2. **Run the application**
+   - Double-click on the installed app
+   - Select your Factorio mods folder on first run
+
+### Configure Your Factorio Mods Folder
+
+On first launch:
+1. Click **Browse** next to "📁 Mods Folder"
+2. Navigate to your Factorio mods directory (typically `C:\Users\[YourUsername]\AppData\Roaming\Factorio\mods`)
+3. Click **Select Folder**
+
+### Basic Usage
+
+#### Download a Mod
+1. Go to the **Downloader** tab
+2. Enter the mod name or URL (e.g., `jetpack` or `https://mods.factorio.com/mod/jetpack`)
+3. Review dependencies shown in the info panel
+4. Click **⬇️ Download**
+5. Watch the progress in the downloads panel and sidebar
+6. Optional dependencies are shown but not auto-downloaded (you choose whether to include them)
+
+#### Check for Updates
+1. Go to the **Checker** tab
+2. Click **🔍 Scan Mods** to check for available updates
+3. Mods with updates appear highlighted
+4. Select mods and click **⬆️ Update** to install newer versions
+
+#### Backup & Restore
+1. Select one or more mods in the **Checker** tab
+2. Click **💾 Backup** to create backup copies
+3. Backups are stored in a `backup/` subfolder within your mods directory
+4. Use **♻️ Restore** to restore from backups (if available)
+
+#### Delete Mods
+1. Select mods in the **Checker** tab
+2. Click **🗑️ Delete** to remove them
+3. Confirm the deletion
+
+## Understanding Dependency Display
+
+### Direct Dependencies (in search preview)
+- **🔗 Required:** Mods that must be installed for this mod to work
+- **❓ Optional:** Mods that add extra functionality if present
+- **❌ Incompatible:** Mods that conflict with this one
+- **💿 Requires DLC:** Paid expansions needed
+
+### All Dependencies (will download)
+- **📦** Shows all mods that will be downloaded, including:
+  - The main mod you selected
+  - All required dependencies
+  - All dependencies of dependencies (recursive)
+  - Optional dependencies (if you enabled them)
+
+**Example:** Downloading `jetpack` shows:
+- PickerTweaks (optional dependency of jetpack)
+- stdlib (required by PickerTweaks)
+- long-reach-fix (optional dependency of PickerTweaks)
 
 1. Get the latest release: [FactorioModManager.exe](https://github.com/Musyoka2020-eng/FactorioManager/releases/latest)
 2. Run it - no installation needed
