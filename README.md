@@ -125,6 +125,8 @@ You can optionally add your Factorio API credentials for higher download limits 
 
 - **UI is basic:** I'm not great at UI design yet, so the interface isn't polished. It works, but it's clunky
 - **Text field issues:** Search fields sometimes feel slow or unresponsive
+- **Dependency display:** The way dependencies are shown is functional but could be clearer
+- **Search results:** Searching can be slow and doesn't always show all relevant mods - improving search is a priority
 - **Profile features:** Profile management works but could use better UX
 - **Error messages:** Some are technical/unclear - improving these as I learn
 - **Only on Windows:** The .exe build works on Windows. Linux/macOS requires running from source
@@ -222,7 +224,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Factorio mod portal API for mod data
 - [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) for web parsing
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the GUI
-- Factorio community for feedback and suggestions
 
 ## Support
 
