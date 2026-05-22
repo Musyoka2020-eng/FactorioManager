@@ -1,204 +1,130 @@
 # Factorio Mod Manager
 
-A comprehensive graphical tool for managing Factorio mods with automatic dependency resolution, mod searching, and batch operations.
+A graphical tool for managing Factorio mods. Handles downloading, dependency resolution, checking for updates, and basic mod operations.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.12+-green.svg)
 
-## Features
+## What it does
 
-✨ **Smart Mod Management**
-- 🔍 Search mods from the Factorio mod portal with live preview
-- 📥 Download mods with automatic dependency resolution
-- ♻️ Check for and install mod updates
-- 💾 Backup and restore mod versions
-- 🗑️ Delete mods with confirmation
+**Mod management**
+- Search mods from the Factorio mod portal
+- Download mods with automatic dependency resolution
+- Check for and install mod updates
+- Backup and restore mod versions
+- Delete mods
 
-✨ **Dependency Handling**
-- 🔗 Automatic recursive dependency resolution
-- ❓ Optional dependency support (with user control)
-- ⚠️ Conflict detection - warns about incompatible mods
-- 📦 Shows all transitive dependencies before downloading
+**Dependency handling**
+- Resolves dependencies recursively
+- Handles optional dependencies (you choose whether to include them)
+- Detects conflicts between mods
+- Shows you what will be downloaded before you proceed
 
-✨ **Advanced Features**
-- 🔄 Multithreaded downloads (up to 4 concurrent mods)
-- 📊 Real-time progress tracking with visual progress bars
-- 📋 Download console with detailed logs
-- 📥 Individual mod status in downloads sidebar
-- 🌐 Cross-platform support (Windows, Linux, macOS)
+**Other features**
+- Download multiple mods at once (up to 4 concurrent)
+- Download logs and progress tracking
+- Can save mod profiles to apply later
 
 ## Quick Start
 
-### Download & Install
+**Download & Install**
 
-1. **Download the latest release:** [FactorioModManager.exe](https://github.com/Musyoka2020-eng/FactorioManager/releases/latest)
-   - No installation required - just run the executable!
-   - Requires Windows 7+ with .NET Framework
+1. Get the latest release: [FactorioModManager.exe](https://github.com/Musyoka2020-eng/FactorioManager/releases/latest)
+2. Run it - no installation needed
+3. On first run, select your Factorio mods folder (usually `C:\Users\[YourUsername]\AppData\Roaming\Factorio\mods`)
 
-2. **Run the application**
-   - Double-click `FactorioModManager.exe`
-   - Select your Factorio mods folder on first run
+**Basic workflow**
 
-### Configure Your Factorio Mods Folder
+- **Downloader tab:** Search for mods, review what will be downloaded, click Download
+- **Checker tab:** Scan for updates, backup mods, delete mods
+- **Profiles:** Save combinations of mods and apply them later
 
-On first launch:
-1. Click **Browse** next to "📁 Mods Folder"
-2. Navigate to your Factorio mods directory (typically `C:\Users\[YourUsername]\AppData\Roaming\Factorio\mods`)
-3. Click **Select Folder**
+## Understanding Dependencies
 
-### Basic Usage
+When you search for a mod, you'll see:
+- **Required:** Mods that need to be installed for this to work
+- **Optional:** Extra mods that add features if you want them
+- **Incompatible:** Mods that conflict with this one
 
-#### Download a Mod
-1. Go to the **Downloader** tab
-2. Enter the mod name or URL (e.g., `jetpack` or `https://mods.factorio.com/mod/jetpack`)
-3. Review dependencies shown in the info panel
-4. Click **⬇️ Download**
-5. Watch the progress in the downloads panel and sidebar
-6. Optional dependencies are shown but not auto-downloaded (you choose whether to include them)
-
-#### Check for Updates
-1. Go to the **Checker** tab
-2. Click **🔍 Scan Mods** to check for available updates
-3. Mods with updates appear highlighted
-4. Select mods and click **⬆️ Update** to install newer versions
-
-#### Backup & Restore
-1. Select one or more mods in the **Checker** tab
-2. Click **💾 Backup** to create backup copies
-3. Backups are stored in a `backup/` subfolder within your mods directory
-4. Use **♻️ Restore** to restore from backups (if available)
-
-#### Delete Mods
-1. Select mods in the **Checker** tab
-2. Click **🗑️ Delete** to remove them
-3. Confirm the deletion
-
-## Understanding Dependency Display
-
-### Direct Dependencies (in search preview)
-- **🔗 Required:** Mods that must be installed for this mod to work
-- **❓ Optional:** Mods that add extra functionality if present
-- **❌ Incompatible:** Mods that conflict with this one
-- **💿 Requires DLC:** Paid expansions needed
-
-### All Dependencies (will download)
-- **📦** Shows all mods that will be downloaded, including:
-  - The main mod you selected
-  - All required dependencies
-  - All dependencies of dependencies (recursive)
-  - Optional dependencies (if you enabled them)
-
-**Example:** Downloading `jetpack` shows:
-- PickerTweaks (optional dependency of jetpack)
-- stdlib (required by PickerTweaks)
-- long-reach-fix (optional dependency of PickerTweaks)
+When you download, it shows all the mods that will be installed - the one you want plus everything it needs (and what those need, etc.). Optional dependencies are included if you enable that option.
 
 ## Conflict Detection
 
-The app checks for conflicts in two ways:
-
-1. **Between downloaded mods** - Warns if any mod you're downloading conflicts with another
-2. **With installed mods** - Warns if what you're downloading conflicts with already-installed mods
-3. **Incompatible dependencies** - Identifies mods that can't coexist
-
-⚠️ **Note:** Incompatible mods will still download but won't work together in-game.
+The app checks if mods you're downloading conflict with each other or with mods you already have. It will warn you, but it doesn't stop the download - that's on you.
 
 ## Configuration
 
-Settings are automatically saved in:
-- **Windows:** `C:\Users\[YourUsername]\AppData\Local\FactorioModManager\config.ini`
-- **Linux:** `~/.config/FactorioModManager/config.ini`
-- **macOS:** `~/Library/Application Support/FactorioModManager/config.ini`
+Settings are saved locally:
+- Windows: `C:\Users\[YourUsername]\AppData\Local\FactorioModManager\config.ini`
+- Linux: `~/.config/FactorioModManager/config.ini`
+- macOS: `~/Library/Application Support/FactorioModManager/config.ini`
 
-Settings include:
-- Mods folder location
-- Factorio API credentials (optional, for higher download limits)
-- Download preferences
-- Optional dependency settings
+You can optionally add your Factorio API credentials for higher download limits (get your token from [mods.factorio.com](https://mods.factorio.com) user profile).
 
-## Advanced: Factorio API Authentication
+## Limitations & Known Issues
 
-For higher download limits and faster downloads, you can add your Factorio credentials:
-
-1. Get your API token from [mods.factorio.com](https://mods.factorio.com) → User Profile → Authentication
-2. In the app, add your username and token to the settings
-3. Credentials are stored locally and never shared
+- **UI is basic:** I'm not great at UI design yet, so the interface isn't polished. It works, but it's clunky
+- **Text field issues:** Search fields sometimes feel slow or unresponsive
+- **Profile features:** Profile management works but could use better UX
+- **Error messages:** Some are technical/unclear - improving these as I learn
+- **Only on Windows:** The .exe build works on Windows. Linux/macOS requires running from source
+- **No mod conflicts:** The app detects conflicts but doesn't prevent installation - if you install incompatible mods, they just won't load
 
 ## Troubleshooting
 
-### "Mods folder not found"
-- Ensure the path to your mods folder is correct
-- Check that the folder exists and you have read/write permissions
+**"Mods folder not found"**
+- Make sure the path is correct and you have read/write permissions
 
-### Download fails with "404 Not Found"
-- The mod may have been removed from the portal
-- Try searching on [mods.factorio.com](https://mods.factorio.com) to confirm it exists
-- Check the mod name spelling
+**Download fails with "404 Not Found"**
+- The mod may have been removed or the name is wrong
+- Try searching on [mods.factorio.com](https://mods.factorio.com)
 
-### "Invalid ZIP file" error
-- The download was corrupted
-- Try downloading again
-- If it persists, the mod may have a server-side issue
+**"Invalid ZIP file" error**
+- Download got corrupted - try again or the mod might have a server issue
 
-### Mod appears to be installed but game doesn't recognize it
-- Factorio may require a restart to load new mods
-- Check that the mod is enabled in-game (`Mods` → Enable)
-- Verify the mod version is compatible with your Factorio version
-
-### Status bar doesn't update during downloads
-- This is normal - it updates as each mod completes
-- Check the detailed progress in the Downloader tab console
+**Mod installed but game doesn't recognize it**
+- Factorio needs to be restarted to load new mods
+- Check that the mod is enabled in-game (Mods → Enable)
+- Make sure the mod version matches your Factorio version
 
 ## System Requirements
 
-- **OS:** Windows 7+ (or Linux/macOS with Python 3.12+)
-- **Disk Space:** 50MB for the app + space for mods
-- **Internet:** Required for downloading mods and checking updates
-- **.NET Framework:** Windows only (usually pre-installed)
+- Windows 7+ (or Python 3.12+ for Linux/macOS)
+- Disk space for mods
+- Internet for downloading
 
 ## For Developers
 
-### Building from Source
+**Running from source**
 
 ```bash
-# Clone the repository
 git clone https://github.com/Musyoka2020-eng/FactorioManager.git
 cd FactorioManager
-
-# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+venv\Scripts\activate
 pip install -r requirements.txt
-
-# Run the app
 python -m factorio_mod_manager.main
 ```
 
-### Building the Executable
+**Building the .exe**
 
 ```bash
-# Install PyInstaller
 pip install pyinstaller
-
-# Build
 pyinstaller FactorioModManager.spec --clean
 ```
 
-The executable will be in `dist/FactorioModManager.exe`
+Output is in `dist/FactorioModManager.exe`
 
 ## Architecture
 
-- **Core:** `factorio_mod_manager/core/` - Download, update, and mod management logic
-- **UI:** `factorio_mod_manager/ui/` - Tkinter GUI with multiple tabs
-- **Utils:** `factorio_mod_manager/utils/` - Helpers, logging, configuration
+- `factorio_mod_manager/core/` - Download, update, dependency logic
+- `factorio_mod_manager/ui/` - GUI (tkinter)
+- `factorio_mod_manager/utils/` - Helpers, logging, config
 
-### Key Components
-
-- `portal.py` - Factorio mod portal API integration
-- `downloader.py` - Mod downloading with dependency resolution
-- `checker.py` - Update checking and mod management
+Key files:
+- `portal.py` - API integration
+- `downloader.py` - Download and dependency resolution
+- `checker.py` - Update checking
 - `main_window.py` - Main UI controller
 - `downloader_tab.py` / `checker_tab.py` - Tab implementations
 
