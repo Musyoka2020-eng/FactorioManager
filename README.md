@@ -162,7 +162,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Factorio mod portal API for mod data
 - [BeautifulSoup](https://www.crummy.com/software/BeautifulSoup/) for web parsing
 - [Tkinter](https://docs.python.org/3/library/tkinter.html) for the GUI
-- Factorio community for feedback and suggestions
 
 ## Support
 
